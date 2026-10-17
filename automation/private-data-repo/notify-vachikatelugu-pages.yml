@@ -1,0 +1,141 @@
+name: Validate catalogue and trigger VachikaTelugu deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "vachikatelugu.db"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vachikatelugu-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate-and-trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the private data repository
+        uses: actions/checkout@v4
+
+      - name: Validate SQLite integrity and the site input schema
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import sqlite3
+          import sys
+          from pathlib import Path
+
+          path = Path("vachikatelugu.db")
+          if not path.is_file():
+              sys.exit("ERROR: vachikatelugu.db is missing from the repository root.")
+
+          try:
+              con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+              con.row_factory = sqlite3.Row
+              result = con.execute("PRAGMA quick_check").fetchone()
+              if not result or result[0] != "ok":
+                  sys.exit(f"ERROR: SQLite quick_check failed: {tuple(result) if result else result}")
+
+              tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              if "movies" not in tables:
+                  sys.exit("ERROR: required table movies is missing.")
+
+              columns = {r[1].lower(): r[1] for r in con.execute("PRAGMA table_info(movies)")}
+              required = {"imdb_id", "title", "raw_json", "processing_status"}
+              missing = sorted(required - set(columns))
+              if missing:
+                  sys.exit("ERROR: movies table missing required column(s): " + ", ".join(missing))
+
+              rows = con.execute(
+                  f"SELECT {columns['imdb_id']}, {columns['raw_json']} "
+                  f"FROM movies WHERE {columns['processing_status']}='processed'"
+              ).fetchall()
+              if not rows:
+                  sys.exit("ERROR: no processed movies found in SQLite database.")
+
+              seen_movies = set()
+              movie_count = 0
+              song_count = 0
+              errors = []
+              for row_number, row in enumerate(rows, start=1):
+                  db_id, raw = row[0], row[1]
+                  label = str(db_id or f"row {row_number}")
+                  try:
+                      movie = json.loads(raw)
+                  except (TypeError, json.JSONDecodeError):
+                      errors.append(f"{label}: raw_json is invalid")
+                      continue
+                  if not isinstance(movie, dict):
+                      errors.append(f"{label}: raw_json must be a JSON object")
+                      continue
+                  if movie.get("error_flag"):
+                      errors.append(f"{label}: marked error_flag")
+                  if not str(movie.get("title") or "").strip():
+                      errors.append(f"{label}: title missing")
+                  movie_id = str(movie.get("movie_id") or movie.get("imdb_id") or db_id or "").strip()
+                  if not movie_id:
+                      errors.append(f"{label}: movie identifier missing")
+                  elif movie_id in seen_movies:
+                      errors.append(f"{label}: duplicate movie identifier {movie_id}")
+                  seen_movies.add(movie_id)
+                  songs = movie.get("songs")
+                  if not isinstance(songs, list):
+                      errors.append(f"{label}: songs must be a list")
+                      continue
+                  movie_count += 1
+                  song_count += len(songs)
+                  for song_index, song in enumerate(songs, start=1):
+                      s_label = f"{label} song #{song_index}"
+                      if not isinstance(song, dict) or not str(song.get("title") or "").strip():
+                          errors.append(f"{s_label}: song object/title missing")
+                          continue
+                      media = song.get("media") if isinstance(song.get("media"), dict) else {}
+                      spotify = media.get("spotify") if isinstance(media.get("spotify"), dict) else {}
+                      ytm = media.get("youtube_music") if isinstance(media.get("youtube_music"), dict) else {}
+                      youtube = media.get("youtube_video_song") if isinstance(media.get("youtube_video_song"), dict) else {}
+                      if not (spotify.get("track_id") or ytm.get("video_id") or youtube.get("video_id")):
+                          errors.append(f"{s_label}: stable media ID missing")
+
+              if song_count == 0:
+                  errors.append("no songs found in all processed movie records")
+              if errors:
+                  print("Database validation failed:")
+                  for item in errors[:40]:
+                      print("- " + item)
+                  if len(errors) > 40:
+                      print(f"- ... {len(errors) - 40} more issue(s) omitted")
+                  sys.exit(1)
+              print(f"Database passed validation: {movie_count} processed movies, {song_count} songs, SQLite quick_check=ok.")
+          finally:
+              try:
+                  con.close()
+              except Exception:
+                  pass
+          PY
+
+      - name: Verify the Cloudflare deploy-hook secret is configured
+        env:
+          CLOUDFLARE_PAGES_DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        shell: bash
+        run: |
+          if [ -z "$CLOUDFLARE_PAGES_DEPLOY_HOOK" ]; then
+            echo "::error::Add the CLOUDFLARE_PAGES_DEPLOY_HOOK repository secret in the private database repo settings."
+            exit 1
+          fi
+
+      - name: Trigger Cloudflare Pages production build
+        env:
+          CLOUDFLARE_PAGES_DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --output /dev/null \
+            --connect-timeout 15 --max-time 45 \
+            --request POST "$CLOUDFLARE_PAGES_DEPLOY_HOOK"
+          echo "Validated database; Cloudflare Pages deploy hook triggered."

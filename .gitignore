@@ -1,0 +1,19 @@
+dist/
+__pycache__/
+*.py[cod]
+node_modules/
+.wrangler/
+
+# Private database fetched only during builds; never commit it.
+.build-data/
+vachikatelugu.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+.env
+.env.*

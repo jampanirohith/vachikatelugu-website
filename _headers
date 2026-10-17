@@ -1,0 +1,10 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data: https://image.tmdb.org https://i.scdn.co https://i.ytimg.com; frame-src https://open.spotify.com https://www.youtube-nocookie.com; connect-src 'self'; base-uri 'self'; form-action 'self'
+
+/static/*
+  Cache-Control: public, max-age=3600
+
+/search-index.json
+  Cache-Control: public, max-age=3600
