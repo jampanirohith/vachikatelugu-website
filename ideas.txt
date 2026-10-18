@@ -1,1 +1,3 @@
 animated logo on entry and making the website logo clean like it is square and not looking good change it
+
+number of imdb ratings

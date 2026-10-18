@@ -59,7 +59,7 @@ jobs:
                   sys.exit("ERROR: missing required schema-v4 tables: " + ", ".join(missing_tables))
 
               schema = con.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()
-              if not schema or str(schema[0]) != "4":
+              if not schema or str(schema[0]) != "5":
                   sys.exit(f"ERROR: website expects schema_version 4, found {schema[0] if schema else '(missing)' }.")
 
               required_columns = {
