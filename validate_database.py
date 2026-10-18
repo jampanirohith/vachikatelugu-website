@@ -1,13 +1,47 @@
 #!/usr/bin/env python3
-"""Fail a site build early if the fetched SQLite source is incomplete or invalid."""
+"""Validate the normalized SQLite schema and relationships before site generation."""
 from __future__ import annotations
 
-import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
 
-from db_source import _read_only_connection, database_path
+from db_source import REQUIRED_TABLES, SUPPORTED_SCHEMA_VERSION, _read_only_connection, database_path
+
+REQUIRED_COLUMNS = {
+    "schema_metadata": {"key", "value"},
+    "movies": {
+        "imdb_id", "title", "title_telugu", "release_year", "original_language",
+        "cinematic_universe", "imdb_score", "imdb_votes", "imdb_votes_numeric",
+        "tmdb_url", "imdb_url", "wikipedia_url", "wikipedia_soundtrack_url",
+        "plot_summary", "certification", "runtime_minutes", "poster_url", "backdrop_url",
+        "title_logo_url", "trailer_youtube_id", "total_songs", "processing_status",
+    },
+    "albums": {
+        "album_id", "movie_id", "title", "release_date", "label", "upc_barcode",
+        "spotify_popularity", "artwork_hd_640", "artwork_300", "copyright_c", "copyright_p",
+        "spotify_album_id", "youtube_album_id", "spotify_album_title", "youtube_album_title",
+        "spotify_total_tracks", "spotify_saved_to_library", "spotify_url", "youtube_music_url", "total_tracks",
+    },
+    "songs": {
+        "song_id", "album_id", "movie_id", "track_number", "title", "lyricist", "song_flavor",
+        "lrc_lyrics", "plain_lyrics", "lrclib_id", "lyrics_status", "lyrics_type", "data_source",
+        "is_bonus_track", "duration_formatted", "duration_ms", "duration_sec", "spotify_uri",
+        "track_number_original", "disc_number", "is_explicit", "isrc_code",
+    },
+    "artists": {"artist_id", "artist_name"},
+    "lyricists": {"lyricist_id", "lyricist_name"},
+    "song_artists": {"song_id", "artist_id", "credit_order", "credit_role"},
+    "song_lyricists": {"song_id", "lyricist_id", "credit_order"},
+    "song_media": {"song_id", "platform", "external_id", "url", "preview_url", "views_text", "popularity", "video_title"},
+    "movie_people": {"movie_id", "role", "person_name", "credit_order"},
+    "movie_genres": {"movie_id", "genre", "genre_order"},
+    "song_genres": {"song_id", "genre", "genre_order"},
+    "movie_links": {"movie_id", "link_type", "url"},
+    "ott_availability": {"movie_id", "provider", "availability_type"},
+    "source_album_matches": {"movie_id", "platform", "album_id", "album_title", "url", "source_csv"},
+}
 
 
 def fail(message: str) -> None:
@@ -29,101 +63,147 @@ def main() -> None:
         fail(f"Unable to open database read-only ({type(exc).__name__}).")
 
     try:
-        check_result = connection.execute("PRAGMA quick_check").fetchone()
-        if not check_result or check_result[0] != "ok":
-            fail(f"SQLite quick_check returned {check_result!r}.")
+        integrity = connection.execute("PRAGMA quick_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            fail(f"SQLite quick_check returned {integrity!r}.")
+        fk_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_issues:
+            fail(f"SQLite foreign_key_check found {len(fk_issues)} violation(s); first: {tuple(fk_issues[0])!r}")
 
-        tables = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        if "movies" not in tables:
-            fail("the database does not contain a movies table")
-
-        columns = {
-            row[1].lower(): row[1]
-            for row in connection.execute("PRAGMA table_info(movies)")
-        }
-        required = {"raw_json", "imdb_id", "title"}
-        missing = sorted(required - set(columns))
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = sorted(REQUIRED_TABLES - tables)
         if missing:
-            fail("movies table is missing required column(s): " + ", ".join(missing))
+            fail("missing required normalized table(s): " + ", ".join(missing))
 
-        where_clause = ""
-        if "processing_status" in columns:
-            where_clause = f" WHERE {columns['processing_status']} = 'processed'"
-        query = (
-            f"SELECT {columns['imdb_id']}, {columns['raw_json']} FROM movies"
-            + where_clause
-        )
-        rows = connection.execute(query).fetchall()
-        if not rows:
-            fail("there are no completed movie records to build")
+        column_errors = []
+        for table, expected_columns in REQUIRED_COLUMNS.items():
+            actual_columns = {row[1].lower() for row in connection.execute(f'PRAGMA table_info("{table}")')}
+            absent = sorted(expected_columns - actual_columns)
+            if absent:
+                column_errors.append(f"{table}: {', '.join(absent)}")
+        if column_errors:
+            fail("required schema-v4 columns are missing: " + " | ".join(column_errors))
 
-        movie_ids: set[str] = set()
-        total_songs = 0
+        version_row = connection.execute(
+            "SELECT value FROM schema_metadata WHERE key='schema_version'"
+        ).fetchone()
+        version = str(version_row[0]) if version_row else ""
+        if version != SUPPORTED_SCHEMA_VERSION:
+            fail(f"unsupported schema_version {version or '(missing)'}; expected {SUPPORTED_SCHEMA_VERSION}")
+
+        movie_count = connection.execute(
+            "SELECT COUNT(*) FROM movies WHERE processing_status='processed'"
+        ).fetchone()[0]
+        album_count = connection.execute("""
+            SELECT COUNT(*) FROM albums a JOIN movies m ON m.imdb_id=a.movie_id
+            WHERE m.processing_status='processed'
+        """).fetchone()[0]
+        song_count = connection.execute("""
+            SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed'
+        """).fetchone()[0]
+        if movie_count == 0:
+            fail("there are no processed movies")
+        if album_count == 0:
+            fail("there are no albums associated with processed movies")
+        if song_count == 0:
+            fail("there are no songs associated with processed movies")
+
         errors: list[str] = []
-        for index, (database_id, raw_json) in enumerate(rows, start=1):
-            label = str(database_id or f"row {index}")
-            try:
-                movie = json.loads(raw_json)
-            except (TypeError, json.JSONDecodeError):
-                errors.append(f"{label}: raw_json is not valid JSON")
-                continue
-            if not isinstance(movie, dict):
-                errors.append(f"{label}: raw_json is not a JSON object")
-                continue
-            if movie.get("error_flag"):
-                errors.append(f"{label}: record is marked with error_flag")
-            if not str(movie.get("title") or "").strip():
-                errors.append(f"{label}: source record has no title")
-            source_id = str(movie.get("movie_id") or movie.get("imdb_id") or database_id or "").strip()
-            if not source_id:
-                errors.append(f"{label}: source record has no movie identifier")
-            elif source_id in movie_ids:
-                errors.append(f"{label}: duplicate source movie identifier {source_id}")
-            else:
-                movie_ids.add(source_id)
+        # The internal identity, not a media-provider ID, determines whether a
+        # track exists. Missing streaming URLs are permitted and expected.
+        for table, key, label in (
+            ("movies", "imdb_id", "movie"), ("albums", "album_id", "album"),
+            ("songs", "song_id", "song"),
+        ):
+            rows = connection.execute(f"SELECT {key} FROM {table}").fetchall()
+            for index, row in enumerate(rows, start=1):
+                if not str(row[0] or "").strip():
+                    errors.append(f"{table} row {index} has an empty {key}")
+        unsafe_song_ids = connection.execute("""
+            SELECT s.song_id FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed'
+        """).fetchall()
+        for row in unsafe_song_ids:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", str(row[0] or "")):
+                errors.append(f"song_id is not URL-safe: {str(row[0])[:80]!r}")
 
-            songs = movie.get("songs")
-            if not isinstance(songs, list):
-                errors.append(f"{label}: songs is missing or is not a list")
-                continue
-            total_songs += len(songs)
-            for song_index, song in enumerate(songs, start=1):
-                song_label = f"{label}, song #{song_index}"
-                if not isinstance(song, dict):
-                    errors.append(f"{song_label}: song is not an object")
-                    continue
-                if not str(song.get("title") or "").strip():
-                    errors.append(f"{song_label}: song has no title")
-                media = song.get("media") if isinstance(song.get("media"), dict) else {}
-                spotify = media.get("spotify") if isinstance(media.get("spotify"), dict) else {}
-                ytm = media.get("youtube_music") if isinstance(media.get("youtube_music"), dict) else {}
-                youtube = media.get("youtube_video_song") if isinstance(media.get("youtube_video_song"), dict) else {}
-                media_id = (
-                    spotify.get("track_id")
-                    or ytm.get("video_id")
-                    or youtube.get("video_id")
-                )
-                if not media_id:
-                    errors.append(f"{song_label}: no Spotify, YouTube Music or YouTube video ID for a stable song page")
+        empty_titles = connection.execute("""
+            SELECT COUNT(*) FROM movies
+            WHERE processing_status='processed' AND TRIM(COALESCE(title,''))=''
+        """).fetchone()[0]
+        if empty_titles:
+            errors.append(f"{empty_titles} processed movie(s) have no title")
+        empty_song_titles = connection.execute("""
+            SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed' AND TRIM(COALESCE(s.title,''))=''
+        """).fetchone()[0]
+        if empty_song_titles:
+            errors.append(f"{empty_song_titles} song(s) have no title")
 
-        if total_songs == 0:
-            errors.append("no songs were found in the completed movie records")
+        orphan_song_rows = connection.execute("""
+            SELECT s.song_id
+            FROM songs s JOIN movies m ON m.imdb_id=s.movie_id AND m.processing_status='processed'
+            LEFT JOIN albums a ON a.album_id=s.album_id AND a.movie_id=s.movie_id
+            WHERE a.album_id IS NULL
+            LIMIT 10
+        """).fetchall()
+        for row in orphan_song_rows:
+            errors.append(f"song {row[0]} has no matching album for its movie")
+
+        mismatch_rows = connection.execute("""
+            SELECT s.song_id, s.movie_id, a.movie_id
+            FROM songs s JOIN albums a ON a.album_id=s.album_id
+            JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed' AND s.movie_id <> a.movie_id
+            LIMIT 10
+        """).fetchall()
+        for row in mismatch_rows:
+            errors.append(f"song {row[0]} belongs to movie {row[1]} but its album belongs to {row[2]}")
+
+        for table, key in (("movies", "imdb_id"), ("albums", "album_id"), ("songs", "song_id")):
+            duplicates = connection.execute(
+                f'SELECT "{key}", COUNT(*) n FROM "{table}" GROUP BY "{key}" HAVING n > 1 LIMIT 10'
+            ).fetchall()
+            if duplicates:
+                errors.append(f"duplicate {key} value(s): " + ", ".join(str(row[0]) for row in duplicates))
+
         if errors:
-            preview = errors[:30]
-            fail(
-                f"found {len(errors)} catalogue issue(s) in {len(rows)} movie records; "
-                + " | ".join(preview)
-                + (" | ...more issues omitted" if len(errors) > len(preview) else "")
-            )
+            fail(f"found {len(errors)} normalized catalogue issue(s): " + " | ".join(errors[:30]))
 
+        media_song_count = connection.execute("""
+            SELECT COUNT(DISTINCT s.song_id) FROM songs s
+            JOIN movies m ON m.imdb_id=s.movie_id
+            JOIN song_media sm ON sm.song_id=s.song_id
+            WHERE m.processing_status='processed'
+        """).fetchone()[0]
+        lyricist_credit_count = connection.execute("""
+            SELECT COUNT(*) FROM song_lyricists sl JOIN songs s ON s.song_id=sl.song_id
+            JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed'
+        """).fetchone()[0]
+        lrc_count = connection.execute("""
+            SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed' AND TRIM(COALESCE(s.lrc_lyrics,''))<>''
+        """).fetchone()[0]
+        plain_count = connection.execute("""
+            SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+            WHERE m.processing_status='processed' AND TRIM(COALESCE(s.plain_lyrics,''))<>''
+        """).fetchone()[0]
+        genre_count = connection.execute("""
+            SELECT COUNT(*) FROM song_genres sg JOIN songs s ON s.song_id=sg.song_id
+            JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed'
+        """).fetchone()[0]
         print(
-            f"SQLite validation passed: {len(rows)} completed movies, "
-            f"{total_songs} songs, database integrity ok ({Path(db).name})."
+            f"SQLite validation passed: schema {version}, {movie_count} movies, "
+            f"{album_count} albums, {song_count} songs; integrity and FK checks ok "
+            f"({Path(db).name})."
+        )
+        print(
+            "Coverage notice: "
+            f"{media_song_count}/{song_count} songs have media rows; "
+            f"{lyricist_credit_count} lyricist relationships; "
+            f"{lrc_count} LRC lyric records; {plain_count} plain lyric records; "
+            f"{genre_count} normalized song-genre relationships. Missing media/lyrics/genres are not build errors."
         )
     finally:
         connection.close()

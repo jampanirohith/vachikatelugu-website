@@ -15,20 +15,21 @@ DIST = ROOT / "dist"
 # of catalogue fields, not a dump of raw database rows.
 ALLOWED_INDEX_KEYS = {
     "songs": {
-        "id", "title", "movieTitle", "movieSlug", "moviePath", "albumPath",
-        "year", "released", "artists", "musicDirectors", "plays", "playsNum",
-        "duration", "number", "songCount", "artwork", "poster", "genres", "imdbId",
-        "release", "spotifyId", "ytmId", "spotifyUrl", "ytmUrl", "youtubeVideoUrl",
-        "youtubeVideoId", "youtubeVideoTitle", "youtubeVideoViews", "isrc", "durationMs",
+        "id", "title", "movieTitle", "movieSlug", "moviePath", "albumPath", "albumTitle",
+        "year", "released", "artists", "lyricists", "musicDirectors", "plays", "playsNum",
+        "duration", "durationSec", "number", "discNumber", "songCount", "artwork", "poster",
+        "genres", "movieGenres", "songFlavor", "imdbId", "release", "spotifyId", "ytmId",
+        "spotifyUrl", "ytmUrl", "youtubeVideoUrl", "youtubeVideoId", "youtubeVideoTitle",
+        "youtubeVideoViews",
     },
     "movies": {
         "slug", "path", "albumPath", "imdbId", "title", "telugu", "year", "released",
         "genres", "musicDirectors", "directors", "cast", "plot", "certification",
-        "originalLanguage", "runtimeMinutes", "ottProviders", "songs", "poster", "artwork",
+        "originalLanguage", "runtimeMinutes", "ottProviders", "songs", "albums", "poster", "artwork",
         "playsNum", "albumReleased",
     },
     "albums": {
-        "slug", "path", "moviePath", "imdbId", "title", "year", "release", "artist",
+        "slug", "path", "moviePath", "imdbId", "title", "movieTitle", "year", "release", "artist",
         "musicDirectors", "genres", "artwork", "plays", "songs",
     },
 }

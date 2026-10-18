@@ -30,7 +30,7 @@
   function loadIndex() {
     if (index) return Promise.resolve(index);
     if (indexPromise) return indexPromise;
-    indexPromise = fetch("/search-index.json?v=20261016-jsonmeta3", { credentials: "same-origin" })
+    indexPromise = fetch("/search-index.json?v=__SEARCH_INDEX_VERSION__", { credentials: "same-origin" })
       .then(function (response) {
         if (!response.ok) throw new Error("Search data returned " + response.status);
         return response.json();
@@ -51,8 +51,9 @@
   }
 
   function fieldsForSong(song) {
-    return [song.title, song.movieTitle, song.year, (song.artists || []).join(" "),
-      (song.musicDirectors || []).join(" "), (song.genres || []).join(" "), song.imdbId, song.number];
+    return [song.title, song.albumTitle, song.movieTitle, song.year, (song.artists || []).join(" "),
+      (song.lyricists || []).join(" "), (song.musicDirectors || []).join(" "),
+      (song.genres || []).join(" "), (song.movieGenres || []).join(" "), song.songFlavor, song.imdbId, song.number];
   }
 
   function fieldsForMovie(movie) {
@@ -93,7 +94,7 @@
   }
 
   function fieldsForAlbum(album) {
-    return [album.title, album.year, album.imdbId, album.artist, (album.musicDirectors || []).join(" "),
+    return [album.title, album.movieTitle, album.year, album.imdbId, album.artist, (album.musicDirectors || []).join(" "),
       (album.genres || []).join(" "), album.release, album.songs];
   }
 
@@ -175,8 +176,8 @@
     if (albums.length) {
       popover.appendChild(makeElement("p", "suggestion-heading", "ALBUMS"));
       albums.forEach(function (album) {
-        popover.appendChild(makeSuggestion(album.path, "◉", album.title + " soundtrack",
-          album.year + " · " + album.songs + (album.songs === 1 ? " song" : " songs")));
+        popover.appendChild(makeSuggestion(album.path, "◉", album.title,
+          album.movieTitle + " · " + album.year + " · " + album.songs + (album.songs === 1 ? " song" : " songs")));
         count += 1;
       });
     }
@@ -376,6 +377,7 @@
     var query = document.getElementById("song-query");
     var sort = document.getElementById("song-sort");
     var artist = document.getElementById("song-artist");
+    var lyricist = document.getElementById("song-lyricist");
     var music = document.getElementById("song-music");
     var genre = document.getElementById("song-genre");
     var from = document.getElementById("song-from");
@@ -387,14 +389,16 @@
     function update() {
       var term = norm(query.value);
       var selectedArtist = artist ? artist.value : "";
+      var selectedLyricist = lyricist ? lyricist.value : "";
       var selectedMusic = music ? music.value : "";
       var selectedGenre = genre ? genre.value : "";
       var fromDate = from ? from.value : "";
       var toDate = to ? to.value : "";
       var visible = cards.filter(function (card) {
         var release = card.dataset.release || "";
-        return (!term || norm([card.dataset.title, card.dataset.artists, card.dataset.music].join(" ")).indexOf(term) >= 0)
+        return (!term || norm([card.dataset.title, card.dataset.artists, card.dataset.lyricists, card.dataset.music, card.dataset.album].join(" ")).indexOf(term) >= 0)
           && (!selectedArtist || (card.dataset.artists || "").split("|").indexOf(selectedArtist) >= 0)
+          && (!selectedLyricist || (card.dataset.lyricists || "").split("|").indexOf(selectedLyricist) >= 0)
           && (!selectedMusic || (card.dataset.music || "").split("|").indexOf(selectedMusic) >= 0)
           && (!selectedGenre || (card.dataset.genre || "").split("|").indexOf(selectedGenre) >= 0)
           && (!fromDate || (release && release >= fromDate))
@@ -412,7 +416,7 @@
       if (count) count.textContent = visible.length + (visible.length === 1 ? " song" : " songs");
       if (noResults) noResults.hidden = visible.length > 0;
     }
-    [query, sort, artist, music, genre, from, to].forEach(function (control) {
+    [query, sort, artist, lyricist, music, genre, from, to].forEach(function (control) {
       if (control) control.addEventListener(control.tagName === "INPUT" && control.type !== "date" ? "input" : "change", update);
     });
     update();
@@ -433,7 +437,7 @@
     function toResult(type, item) {
       if (type === "song") return { type: type, item: item, title: item.title, subtitle: (item.artists || []).join(", ") + " · " + item.movieTitle + " (" + item.year + ")", path: "/song/" + encodeURIComponent(item.id) + "/", image: item.artwork || item.poster, date: item.release || item.released || "", plays: Number(item.playsNum || 0), fields: fieldsForSong(item) };
       if (type === "movie") return { type: type, item: item, title: item.title, subtitle: item.year + " · " + (item.genres || []).slice(0, 3).join(", ") + (item.imdbId ? " · " + item.imdbId : ""), path: item.path, image: item.poster || item.artwork, date: item.released || (item.year + "-01-01"), plays: Number(item.playsNum || 0), fields: fieldsForMovie(item) };
-      return { type: type, item: item, title: item.title + " soundtrack", subtitle: item.year + " · " + (item.artist || "Telugu film soundtrack") + " · " + item.songs + " songs", path: item.path, image: item.artwork, date: item.release || "", plays: Number(item.plays || 0), fields: fieldsForAlbum(item) };
+      return { type: type, item: item, title: item.title, subtitle: item.movieTitle + " · " + item.year + " · " + item.songs + (item.songs === 1 ? " song" : " songs"), path: item.path, image: item.artwork, date: item.release || "", plays: Number(item.plays || 0), fields: fieldsForAlbum(item) };
     }
     function resultCard(result) {
       var a = makeElement("a", "advanced-result-card"); a.href = result.path;
@@ -612,18 +616,20 @@
     if (drawerAlbumLink) {
       drawerAlbumLink.href = song.albumPath || ("/album/" + encodeURIComponent(song.movieSlug) + "/");
     }
-    drawerArtists.textContent = (song.artists || []).length ? (song.artists || []).join(", ") : "Artist credits unavailable";
+    drawerArtists.textContent = (song.artists || []).join(", ");
+    drawerArtists.hidden = !(song.artists || []).length;
     drawerFacts.textContent = "";
     appendDrawerFact("Music", (song.musicDirectors || []).join(", "));
+    appendDrawerFact("Lyricist" + ((song.lyricists || []).length === 1 ? "" : "s"), song.lyricists || []);
     appendDrawerFact("Duration", song.duration);
     appendDrawerFact("Track", song.number && song.songCount ? song.number + " of " + song.songCount : "");
     appendDrawerFact("YouTube Music", song.plays);
     appendDrawerFact("Genre", song.genres || []);
+    appendDrawerFact("Song style", song.songFlavor || "");
     drawerActions.textContent = "";
     appendDrawerLink("Open on Spotify", song.spotifyUrl, Boolean(song.spotifyUrl), "spotify");
     appendDrawerLink("Open on YouTube Music", song.ytmUrl, !song.spotifyUrl && Boolean(song.ytmUrl), "youtube");
     appendDrawerLink("Watch on YouTube", song.youtubeVideoUrl, !song.spotifyUrl && !song.ytmUrl && Boolean(song.youtubeVideoUrl), "youtube");
-    appendDrawerFact("ISRC", song.isrc);
     drawerPlayerArea.textContent = "";
     if (song.spotifyId || song.ytmId) {
       var playButton = makeElement("button", "btn drawer-play-here", "Play here");

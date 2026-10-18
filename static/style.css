@@ -878,3 +878,80 @@ html[data-theme="light"] .ott-provider-btn:hover { background: #fff; }
   .ott-logo { width: 36px; height: 36px; border-radius: 9px; }
   .ott-provider-copy strong { font-size: .75rem; }
 }
+
+
+/* Curated lyrics presentation. LRC timestamps remain available on each line,
+   while plain lyrics use the same readable panel without fake synchronization. */
+.song-lyrics-section {
+  margin-block: clamp(2rem, 5vw, 4rem);
+}
+.song-lyrics-section .section-heading {
+  align-items: end;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.lyrics-format {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--rule, rgba(255,255,255,.14));
+  border-radius: 999px;
+  padding: .35rem .7rem;
+  color: var(--muted, #a8aca8);
+  font-size: .78rem;
+  white-space: nowrap;
+}
+.lyrics-panel {
+  max-width: 58rem;
+  padding: clamp(1.15rem, 3vw, 2rem);
+  border: 1px solid var(--rule, rgba(255,255,255,.12));
+  border-radius: 1.1rem;
+  background: var(--bg-raised, rgba(255,255,255,.035));
+}
+.lyrics-lines {
+  display: grid;
+  gap: .8rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lyrics-line {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: .85rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lyrics-line-untimed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.lyrics-timestamp {
+  color: var(--muted, #a8aca8);
+  font-variant-numeric: tabular-nums;
+  font-size: .78rem;
+}
+.lyrics-plain p {
+  margin: 0 0 .8rem;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lyrics-plain p:last-child {
+  margin-bottom: 0;
+}
+.song-credit-line:empty {
+  display: none;
+}
+.album-cover-fallback {
+  object-fit: cover;
+}
+@media (max-width: 600px) {
+  .lyrics-line {
+    grid-template-columns: 2.7rem minmax(0, 1fr);
+    gap: .6rem;
+  }
+  .song-lyrics-section .section-heading {
+    align-items: start;
+  }
+}

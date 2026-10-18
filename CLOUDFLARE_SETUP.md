@@ -52,17 +52,19 @@ A push that changes `vachikatelugu.db` on `main` will run the database validatio
 A successful production build must show all of these:
 
 - `Fetched private SQLite database ...`
-- `SQLite validation passed ...`
+- `SQLite validation passed ...` with schema version 4 and row counts
+- `build.py` reports all processed movies, albums and songs, including songs without media
 - `python3 check.py` ends with `ok`
 - `Public-output check passed ...`
 - Cloudflare reports the deployment as **Success**
 
-If `validate_database.py` fails, do not remove the check to force a deploy. Review the error and confirm the real DB matches the collector's schema. This project expects complete movie objects in `movies.raw_json`, including nested `songs` and the song `media` IDs used to generate stable song routes.
+If `validate_database.py` fails, do not remove the check to force a deploy. Review the error and confirm the committed database matches normalized schema version 4. The website reads explicit columns and relationship tables; it does not depend on `movies.raw_json`, `albums.raw_json`, `songs.raw_json`, or provider/source JSON blobs. Songs without media IDs or lyrics remain valid and still receive pages. The generated `search-index.json` is derived during the build from normalized DB values, not an external source of truth.
 
 ## 5. Security notes
 
 - Never commit the SQLite database, GitHub token, Cloudflare deploy-hook URL, `.env` file, or credentials to the website repository.
 - The builder reads SQLite in read-only mode. The downloaded file lives in `.build-data/`, which is ignored by Git and not copied to `dist/`.
+- A private-database commit continues to trigger the existing GitHub Actions → Cloudflare Pages deploy-hook workflow. Supabase is not needed for this static publishing pipeline.
 - `check_public_output.py` blocks database files, secret-looking files, common credential patterns, the configured `GITHUB_TOKEN` value, and unreviewed fields in `search-index.json`.
 - The website intentionally publishes the catalogue metadata needed for the public-facing pages. Do not put genuinely private notes or credentials in the catalog fields used by the page generator.
 - Revoke any token ever pasted into a chat or committed to a repository. Create a replacement and update the Cloudflare secret.

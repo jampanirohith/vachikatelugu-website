@@ -23,11 +23,11 @@ jobs:
       - name: Check out the private data repository
         uses: actions/checkout@v4
 
-      - name: Validate SQLite integrity and the site input schema
+      - name: Validate normalized SQLite catalogue schema
         shell: bash
         run: |
           python - <<'PY'
-          import json
+          import re
           import sqlite3
           import sys
           from pathlib import Path
@@ -36,88 +36,101 @@ jobs:
           if not path.is_file():
               sys.exit("ERROR: vachikatelugu.db is missing from the repository root.")
 
+          con = None
           try:
               con = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
               con.row_factory = sqlite3.Row
-              result = con.execute("PRAGMA quick_check").fetchone()
-              if not result or result[0] != "ok":
-                  sys.exit(f"ERROR: SQLite quick_check failed: {tuple(result) if result else result}")
+              integrity = con.execute("PRAGMA quick_check").fetchone()
+              if not integrity or integrity[0] != "ok":
+                  sys.exit(f"ERROR: SQLite quick_check failed: {tuple(integrity) if integrity else integrity}")
+              fk_errors = con.execute("PRAGMA foreign_key_check").fetchall()
+              if fk_errors:
+                  sys.exit(f"ERROR: SQLite foreign_key_check found {len(fk_errors)} violation(s).")
 
+              required = {
+                  "schema_metadata", "movies", "albums", "songs", "artists", "lyricists",
+                  "song_artists", "song_lyricists", "song_media", "movie_people",
+                  "movie_genres", "song_genres", "movie_links", "ott_availability",
+                  "source_album_matches",
+              }
               tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-              if "movies" not in tables:
-                  sys.exit("ERROR: required table movies is missing.")
+              missing_tables = sorted(required - tables)
+              if missing_tables:
+                  sys.exit("ERROR: missing required schema-v4 tables: " + ", ".join(missing_tables))
 
-              columns = {r[1].lower(): r[1] for r in con.execute("PRAGMA table_info(movies)")}
-              required = {"imdb_id", "title", "raw_json", "processing_status"}
-              missing = sorted(required - set(columns))
-              if missing:
-                  sys.exit("ERROR: movies table missing required column(s): " + ", ".join(missing))
+              schema = con.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()
+              if not schema or str(schema[0]) != "4":
+                  sys.exit(f"ERROR: website expects schema_version 4, found {schema[0] if schema else '(missing)' }.")
 
-              rows = con.execute(
-                  f"SELECT {columns['imdb_id']}, {columns['raw_json']} "
-                  f"FROM movies WHERE {columns['processing_status']}='processed'"
-              ).fetchall()
-              if not rows:
-                  sys.exit("ERROR: no processed movies found in SQLite database.")
+              required_columns = {
+                  "schema_metadata": {"key", "value"},
+                  "movies": {"imdb_id", "title", "title_telugu", "release_year", "original_language", "cinematic_universe", "imdb_score", "imdb_votes", "imdb_votes_numeric", "tmdb_url", "imdb_url", "wikipedia_url", "wikipedia_soundtrack_url", "plot_summary", "certification", "runtime_minutes", "poster_url", "backdrop_url", "title_logo_url", "trailer_youtube_id", "total_songs", "processing_status"},
+                  "albums": {"album_id", "movie_id", "title", "release_date", "label", "upc_barcode", "spotify_popularity", "artwork_hd_640", "artwork_300", "copyright_c", "copyright_p", "spotify_album_id", "youtube_album_id", "spotify_album_title", "youtube_album_title", "spotify_total_tracks", "spotify_saved_to_library", "spotify_url", "youtube_music_url", "total_tracks"},
+                  "songs": {"song_id", "album_id", "movie_id", "title", "track_number", "track_number_original", "disc_number", "lyricist", "song_flavor", "lrc_lyrics", "plain_lyrics", "lrclib_id", "lyrics_status", "lyrics_type", "data_source", "is_bonus_track", "duration_formatted", "duration_ms", "duration_sec", "spotify_uri", "is_explicit", "isrc_code"},
+                  "artists": {"artist_id", "artist_name"},
+                  "lyricists": {"lyricist_id", "lyricist_name"},
+                  "song_artists": {"song_id", "artist_id", "credit_order", "credit_role"},
+                  "song_lyricists": {"song_id", "lyricist_id", "credit_order"},
+                  "song_media": {"song_id", "platform", "external_id", "url", "preview_url", "views_text", "popularity", "video_title"},
+                  "movie_people": {"movie_id", "role", "person_name", "credit_order"},
+                  "movie_genres": {"movie_id", "genre", "genre_order"},
+                  "song_genres": {"song_id", "genre", "genre_order"},
+                  "movie_links": {"movie_id", "link_type", "url"},
+                  "ott_availability": {"movie_id", "provider", "availability_type"},
+                  "source_album_matches": {"movie_id", "platform", "album_id", "album_title", "url", "source_csv"},
+              }
+              for table, expected in required_columns.items():
+                  actual = {row[1].lower() for row in con.execute(f'PRAGMA table_info("{table}")')}
+                  missing = sorted(expected - actual)
+                  if missing:
+                      sys.exit(f"ERROR: {table} is missing required column(s): " + ", ".join(missing))
 
-              seen_movies = set()
-              movie_count = 0
-              song_count = 0
-              errors = []
-              for row_number, row in enumerate(rows, start=1):
-                  db_id, raw = row[0], row[1]
-                  label = str(db_id or f"row {row_number}")
-                  try:
-                      movie = json.loads(raw)
-                  except (TypeError, json.JSONDecodeError):
-                      errors.append(f"{label}: raw_json is invalid")
-                      continue
-                  if not isinstance(movie, dict):
-                      errors.append(f"{label}: raw_json must be a JSON object")
-                      continue
-                  if movie.get("error_flag"):
-                      errors.append(f"{label}: marked error_flag")
-                  if not str(movie.get("title") or "").strip():
-                      errors.append(f"{label}: title missing")
-                  movie_id = str(movie.get("movie_id") or movie.get("imdb_id") or db_id or "").strip()
-                  if not movie_id:
-                      errors.append(f"{label}: movie identifier missing")
-                  elif movie_id in seen_movies:
-                      errors.append(f"{label}: duplicate movie identifier {movie_id}")
-                  seen_movies.add(movie_id)
-                  songs = movie.get("songs")
-                  if not isinstance(songs, list):
-                      errors.append(f"{label}: songs must be a list")
-                      continue
-                  movie_count += 1
-                  song_count += len(songs)
-                  for song_index, song in enumerate(songs, start=1):
-                      s_label = f"{label} song #{song_index}"
-                      if not isinstance(song, dict) or not str(song.get("title") or "").strip():
-                          errors.append(f"{s_label}: song object/title missing")
-                          continue
-                      media = song.get("media") if isinstance(song.get("media"), dict) else {}
-                      spotify = media.get("spotify") if isinstance(media.get("spotify"), dict) else {}
-                      ytm = media.get("youtube_music") if isinstance(media.get("youtube_music"), dict) else {}
-                      youtube = media.get("youtube_video_song") if isinstance(media.get("youtube_video_song"), dict) else {}
-                      if not (spotify.get("track_id") or ytm.get("video_id") or youtube.get("video_id")):
-                          errors.append(f"{s_label}: stable media ID missing")
+              movie_count = con.execute("SELECT COUNT(*) FROM movies WHERE processing_status='processed'").fetchone()[0]
+              album_count = con.execute("""
+                  SELECT COUNT(*) FROM albums a JOIN movies m ON m.imdb_id=a.movie_id
+                  WHERE m.processing_status='processed'
+              """).fetchone()[0]
+              song_count = con.execute("""
+                  SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
+                  JOIN albums a ON a.album_id=s.album_id AND a.movie_id=s.movie_id
+                  WHERE m.processing_status='processed'
+              """).fetchone()[0]
+              if not movie_count or not album_count or not song_count:
+                  sys.exit(f"ERROR: normalized catalogue is empty (movies={movie_count}, albums={album_count}, songs={song_count}).")
 
-              if song_count == 0:
-                  errors.append("no songs found in all processed movie records")
-              if errors:
-                  print("Database validation failed:")
-                  for item in errors[:40]:
-                      print("- " + item)
-                  if len(errors) > 40:
-                      print(f"- ... {len(errors) - 40} more issue(s) omitted")
-                  sys.exit(1)
-              print(f"Database passed validation: {movie_count} processed movies, {song_count} songs, SQLite quick_check=ok.")
+              issues = []
+              checks = [
+                  ("empty processed movie ID", "SELECT COUNT(*) FROM movies WHERE processing_status='processed' AND TRIM(COALESCE(imdb_id,''))=''"),
+                  ("empty processed movie title", "SELECT COUNT(*) FROM movies WHERE processing_status='processed' AND TRIM(COALESCE(title,''))=''"),
+                  ("empty album ID", "SELECT COUNT(*) FROM albums WHERE TRIM(COALESCE(album_id,''))=''"),
+                  ("empty song title", "SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed' AND TRIM(COALESCE(s.title,''))=''"),
+                  ("empty song ID", "SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed' AND TRIM(COALESCE(s.song_id,''))=''"),
+                  ("song without a matching album for its movie", "SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id AND m.processing_status='processed' LEFT JOIN albums a ON a.album_id=s.album_id AND a.movie_id=s.movie_id WHERE a.album_id IS NULL"),
+                  ("duplicate movie IDs", "SELECT COUNT(*) FROM (SELECT imdb_id FROM movies GROUP BY imdb_id HAVING COUNT(*)>1)"),
+                  ("duplicate album IDs", "SELECT COUNT(*) FROM (SELECT album_id FROM albums GROUP BY album_id HAVING COUNT(*)>1)"),
+                  ("duplicate song IDs", "SELECT COUNT(*) FROM (SELECT song_id FROM songs GROUP BY song_id HAVING COUNT(*)>1)"),
+              ]
+              for label, query in checks:
+                  count = con.execute(query).fetchone()[0]
+                  if count:
+                      issues.append(f"{label}: {count}")
+              unsafe_ids = [row[0] for row in con.execute(
+                  "SELECT s.song_id FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed'"
+              ) if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", str(row[0] or ""))]
+              if unsafe_ids:
+                  issues.append(f"URL-unsafe song IDs: {len(unsafe_ids)}")
+              if issues:
+                  sys.exit("ERROR: normalized catalogue check failed: " + "; ".join(issues))
+
+              media_count = con.execute("SELECT COUNT(DISTINCT sm.song_id) FROM song_media sm JOIN songs s ON s.song_id=sm.song_id JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed'").fetchone()[0]
+              lrc_count = con.execute("SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed' AND TRIM(COALESCE(s.lrc_lyrics,''))<>''").fetchone()[0]
+              plain_count = con.execute("SELECT COUNT(*) FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed' AND TRIM(COALESCE(s.plain_lyrics,''))<>''").fetchone()[0]
+              print(f"Validated schema 4: {movie_count} movies, {album_count} albums, {song_count} songs; SQLite integrity and foreign keys are clean.")
+              print(f"Coverage (non-blocking): {media_count}/{song_count} songs have media rows; {lrc_count} LRC lyrics; {plain_count} plain-lyrics rows.")
+              print("Missing provider IDs, lyrics, artists, and song genres do not invalidate a song or block its page.")
           finally:
-              try:
+              if con is not None:
                   con.close()
-              except Exception:
-                  pass
           PY
 
       - name: Verify the Cloudflare deploy-hook secret is configured
