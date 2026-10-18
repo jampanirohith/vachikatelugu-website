@@ -1,12 +1,15 @@
-# VachikaTelugu
+# Vachika
 
-VachikaTelugu is a static Telugu-film-music catalogue for discovering movies, soundtrack albums, songs and credits. The complete SQLite catalogue remains in a **private GitHub repository**; Cloudflare Pages downloads it during a build and publishes generated public pages. Visitors never download or query the private SQLite file.
+Vachika is a static Telugu-film-music catalogue for discovering movies, soundtrack albums, songs and credits. The complete SQLite catalogue remains in a **private GitHub repository**; Cloudflare Pages downloads it during a build and publishes generated public pages. Visitors never download or query the private SQLite file.
 
 ## What the site provides
 
 - Responsive, artwork-led movie, album and song pages with Vachika branding.
 - Global search plus `/advanced-search/` across songs, albums and movies.
 - `/songs/`, `/albums/`, `/movies/` and `/charts/` catalogues with filters and sorting.
+- Responsive Docs-style header using the transparent Vachika wordmark at `static/vachika-wordmark.png` (a PNG logo asset, not a font file).
+- Filter and sort controls stay expanded on desktop and collapse into accessible disclosure panels on mobile; advanced-search options follow the same mobile pattern.
+- Album pages use a clean, unblurred artwork-led hero instead of duplicating a heavily blurred album cover in the page background.
 - Movie pages using IMDb IDs where available, canonical album pages, and song pages keyed by the database's stable `song_id`.
 - Song credits from normalized artist and lyricist relationship tables.
 - Clean song metadata: only useful, populated values are shown; provider URLs/IDs are buttons or player links, not metadata rows.

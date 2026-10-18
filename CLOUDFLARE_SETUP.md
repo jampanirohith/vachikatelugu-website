@@ -1,4 +1,4 @@
-# Production setup: VachikaTelugu + private SQLite database
+# Production setup: Vachika + private SQLite database
 
 ## Architecture
 

@@ -85,20 +85,6 @@ button { color: inherit; }
   white-space: nowrap;
   text-decoration: none;
 }
-.brand-mark {
-  display: grid;
-  place-items: center;
-  flex: 0 0 38px;
-  width: 38px;
-  height: 40px;
-  overflow: hidden;
-  border: 1px solid rgba(255,248,231,.62);
-  border-radius: 10px;
-  background: linear-gradient(145deg, #f3ead9, #d8c9ac);
-  box-shadow: 0 0 22px rgba(203,133,63,.12), inset 0 1px 0 rgba(255,255,255,.9);
-}
-.brand-logo { display: block; width: 100%; height: 100%; object-fit: contain; padding: 2px 5px; }
-.brand-name { letter-spacing: -.025em; }
 .site-nav { display: flex; justify-content: center; align-items: center; gap: 4px; min-width: 0; }
 .nav-link {
   display: inline-flex;
@@ -633,15 +619,6 @@ p { margin: 0 0 12px; }
 
 /* v2 interface: database-wide search, expanded catalogues, accessible themes and provider actions */
 :root { --spotify-contrast: #10110f; --youtube-contrast: #ffffff; }
-.brand-mark {
-  display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 44px;
-  overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none;
-}
-.brand-logo { width: auto; height: 42px; max-width: 25px; object-fit: contain; padding: 0; }
-.logo-for-light { display: none; }
-.logo-for-dark { display: block; }
-html[data-theme="light"] .logo-for-light { display: block; }
-html[data-theme="light"] .logo-for-dark { display: none; }
 .header-inner { grid-template-columns: auto minmax(0,1fr) minmax(330px,430px) auto; gap: 13px; }
 .site-nav { gap: 1px; }
 .nav-link { padding-inline: 9px; font-size: .85rem; }
@@ -954,4 +931,428 @@ html[data-theme="light"] .ott-provider-btn:hover { background: #fff; }
   .song-lyrics-section .section-heading {
     align-items: start;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Vachika visual refresh: precise responsive scaling, docs-style header,
+   collapsible mobile filters and a clean, unblurred album hero.
+   These final rules intentionally consolidate/override earlier theme layers.
+   -------------------------------------------------------------------------- */
+:root {
+  --max: 1320px;
+  --gutter: clamp(14px, 2vw, 28px);
+  --header-bg: rgba(13, 13, 13, .96);
+}
+html, body { max-width: 100%; }
+html { overflow-x: clip; }
+body { overflow-x: clip; }
+#main, .wrap, .page-section, .page-intro, .home-section { min-width: 0; }
+
+/* Header inspired by the supplied Cloudflare Docs reference. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 0 clamp(14px, 2vw, 28px);
+  border-bottom: 1px solid rgba(255,255,255,.09);
+  background: var(--header-bg);
+  box-shadow: 0 1px 0 rgba(0,0,0,.12);
+  backdrop-filter: blur(16px) saturate(115%);
+  -webkit-backdrop-filter: blur(16px) saturate(115%);
+}
+.header-inner {
+  width: min(1600px, 100%);
+  min-height: 63px;
+  grid-template-columns: auto minmax(0, 1fr) minmax(250px, 390px) auto;
+  align-items: center;
+  gap: 16px;
+}
+.brand {
+  min-width: 0;
+  gap: 9px;
+  padding-right: 18px;
+  border-right: 1px solid rgba(255,255,255,.13);
+  color: var(--ink);
+  font-size: .9rem;
+  letter-spacing: 0;
+}
+.brand:hover { color: var(--ink); }
+.brand-wordmark {
+  display: block;
+  width: clamp(132px, 11vw, 164px);
+  max-width: 100%;
+  height: auto;
+  aspect-ratio: 767 / 174;
+  object-fit: contain;
+  flex: 0 1 auto;
+}
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 1px 5px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 5px;
+  color: #a5a5a5;
+  font: 700 .57rem/1.2 system-ui, sans-serif;
+  letter-spacing: .06em;
+}
+html[data-theme="light"] .brand-wordmark { filter: brightness(.20) saturate(.65); }
+.site-nav {
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 3px;
+  overflow: visible;
+}
+.nav-link {
+  min-height: 35px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #bcbcbc;
+  font-size: .84rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.nav-link:hover, .nav-link.active {
+  background: rgba(255,255,255,.055);
+  border-color: transparent;
+  color: #f2f2f2;
+}
+.nav-link.active { box-shadow: inset 0 -2px 0 var(--accent); }
+.header-search {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 35px auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+.header-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 37px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 8px;
+  background: rgba(255,255,255,.035);
+  color: var(--ink);
+  box-shadow: none;
+  font-size: .81rem;
+}
+.header-search input:focus {
+  border-color: rgba(199,242,123,.58);
+  background: rgba(255,255,255,.06);
+  box-shadow: 0 0 0 3px rgba(199,242,123,.07);
+}
+.header-search input::placeholder { color: #959595; }
+.header-search button {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #d1d1d1;
+  font-size: 1.28rem;
+}
+.header-search button:hover { background: rgba(255,255,255,.08); color: #fff; }
+.advanced-search-link {
+  min-height: 30px;
+  padding: 4px 2px 4px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #b9b9b9;
+  font-size: .75rem;
+  font-weight: 600;
+}
+.advanced-search-link:hover { background: transparent; color: var(--accent); }
+.theme-toggle {
+  width: 35px;
+  height: 35px;
+  border-radius: 8px;
+  border-color: rgba(255,255,255,.14);
+  background: rgba(255,255,255,.035);
+  color: #d8d8d8;
+}
+.theme-toggle:hover { border-color: rgba(255,255,255,.27); background: rgba(255,255,255,.08); }
+
+/* More predictable responsive grids and long-content handling. */
+.albums-grid, .movies-grid, .advanced-results-grid { min-width: 0; }
+.albums-grid { grid-template-columns: repeat(auto-fill, minmax(min(154px, 100%), 1fr)); }
+.albums-grid-large { grid-template-columns: repeat(auto-fill, minmax(min(164px, 100%), 1fr)); }
+.albums-grid > li, .movies-grid > li, .album-card, .movie-card, .advanced-result-card { min-width: 0; }
+.album-card-title, .movie-card-title, .name, .sub, .meta, .facts dd { overflow-wrap: anywhere; }
+.tracks, .tracks li, .tracks a, .tracks .main { min-width: 0; }
+.tracks .meta { max-width: 100%; }
+img, video, iframe { max-width: 100%; }
+
+/* Cleaner and more consistent button shapes. */
+.btn {
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,.15);
+  border-radius: 9px;
+  background: rgba(255,255,255,.045);
+  color: var(--ink);
+  font-size: .83rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.btn:hover { border-color: rgba(255,255,255,.25); background: rgba(255,255,255,.085); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-strong); }
+.btn:disabled, button:disabled { opacity: .55; cursor: not-allowed; }
+.actions { align-items: center; gap: 8px; }
+.provider-btn { gap: 7px; }
+html[data-theme="light"] .header-search input { background: rgba(255,255,255,.78); border-color: rgba(30,32,25,.18); }
+html[data-theme="light"] .header-search button, html[data-theme="light"] .nav-link { color: #4c4c48; }
+html[data-theme="light"] .nav-link:hover, html[data-theme="light"] .nav-link.active { color: #1c1d19; background: rgba(25,26,20,.05); }
+html[data-theme="light"] .brand-badge { color: #555; border-color: rgba(30,32,25,.26); }
+html[data-theme="light"] .theme-toggle { background: rgba(255,255,255,.8); color: #292a25; }
+html[data-theme="light"] .advanced-search-link { color: #56574f; }
+html[data-theme="light"] .advanced-search-link:hover { color: var(--accent); }
+
+/* Album details deliberately use a clean solid/tonal backdrop, not a blurred copy of the cover. */
+.album-detail-page {
+  position: relative;
+  min-width: 0;
+  overflow: clip;
+}
+.album-detail-page::before { content: none !important; display: none !important; }
+.album-detail-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(26px, 4.2vw, 52px) 0 34px;
+  border-bottom: 1px solid var(--rule);
+  background:
+    radial-gradient(ellipse at 18% 18%, rgba(199,242,123,.085), transparent 32rem),
+    linear-gradient(135deg, #151712 0%, #10110f 57%, #0b0c0a 100%);
+}
+.album-detail-hero::before, .album-detail-hero::after { content: none !important; display: none !important; }
+.album-detail-head {
+  display: grid;
+  grid-template-columns: minmax(190px, 270px) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(22px, 4vw, 46px);
+}
+.album-detail-art {
+  display: block;
+  width: 100%;
+  max-width: 270px;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 11px;
+  background: #171815;
+  box-shadow: 0 18px 42px rgba(0,0,0,.35);
+}
+.album-detail-copy { min-width: 0; color: var(--ink); }
+.album-detail-copy .eyebrow { color: var(--accent); }
+.album-detail-copy h1 {
+  max-width: 22ch;
+  margin: 0 0 9px;
+  font-size: clamp(2rem, 4.2vw, 4.15rem);
+  line-height: 1.04;
+  letter-spacing: -.045em;
+  overflow-wrap: anywhere;
+}
+.album-telugu { margin: 0 0 8px; color: #d9dbd1; font-size: 1.12rem; line-height: 1.5; }
+.album-byline { margin: 12px 0 4px; color: #c7c8c0; font-weight: 600; overflow-wrap: anywhere; }
+.album-stats { color: #a6a79f; font-size: .88rem; }
+.album-detail-copy .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0 10px; }
+.album-detail-copy .section-note { color: #aaa; margin-top: 10px; }
+.album-release-details { padding-top: 20px; }
+.album-release-details h2 { margin: 0 0 12px; }
+.album-release-details .facts { max-width: 900px; margin-top: 0; }
+.album-track-section { padding-top: 22px; }
+html[data-theme="light"] .album-detail-hero {
+  background:
+    radial-gradient(ellipse at 18% 18%, rgba(85,123,29,.09), transparent 32rem),
+    linear-gradient(135deg, #f2f0e9 0%, #e9e7df 57%, #f7f6f1 100%);
+}
+html[data-theme="light"] .album-detail-copy { color: #191a17; }
+html[data-theme="light"] .album-telugu { color: #37392f; }
+html[data-theme="light"] .album-byline { color: #45463e; }
+html[data-theme="light"] .album-stats, html[data-theme="light"] .album-detail-copy .section-note { color: #62645b; }
+html[data-theme="light"] .album-detail-art { border-color: rgba(20,21,17,.12); box-shadow: 0 15px 34px rgba(0,0,0,.15); }
+
+/* Mobile filter accordions (albums, movies, songs, and advanced-search options). */
+.filter-panel { min-width: 0; }
+.filter-panel > summary { display: none; }
+.filter-summary-count, .filter-summary-detail { margin-left: auto; color: var(--muted-2); font-size: .76rem; font-weight: 600; white-space: nowrap; }
+.filter-summary-chevron {
+  display: inline-block;
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin: 0 3px 3px 7px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform .18s ease;
+}
+.filter-panel[open] > .filter-panel-summary .filter-summary-chevron { transform: rotate(225deg); margin-bottom: -2px; }
+.advanced-search-controls {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.advanced-search-controls .advanced-query-label { grid-column: 1; min-width: 0; }
+.advanced-search-controls .advanced-submit { grid-column: 2; grid-row: 1; min-height: 40px; }
+.advanced-options-panel { grid-column: 1 / -1; min-width: 0; }
+.advanced-search-options { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+.advanced-search-options label { min-width: 0; }
+
+@media (max-width: 1020px) {
+  .header-inner {
+    grid-template-columns: auto minmax(0,1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 3px 12px;
+    padding-block: 7px;
+  }
+  .brand { grid-column: 1; grid-row: 1; }
+  .site-nav { grid-column: 1 / -1; grid-row: 2; }
+  .header-search { grid-column: 2; grid-row: 1; justify-self: stretch; }
+  .theme-toggle { grid-column: 3; grid-row: 1; }
+  .nav-link { min-height: 32px; }
+  .advanced-search-options { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 800px) {
+  :root { --gutter: 14px; }
+  .site-header { padding-inline: 14px; }
+  .header-inner {
+    width: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0,1fr) auto;
+    grid-template-rows: auto auto auto;
+    gap: 7px 10px;
+    padding-block: 8px 7px;
+  }
+  .brand { grid-column: 1; grid-row: 1; gap: 7px; padding-right: 11px; }
+  .brand-wordmark { width: clamp(124px, 39vw, 154px); }
+  .brand-badge { min-height: 16px; padding-inline: 4px; font-size: .52rem; }
+  .theme-toggle { grid-column: 2; grid-row: 1; width: 34px; height: 34px; }
+  .header-search { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0,1fr) 34px auto; gap: 5px; }
+  .header-search input { min-height: 36px; padding: 6px 9px; font-size: .8rem; }
+  .header-search button { width: 33px; height: 33px; }
+  .advanced-search-link { min-height: 32px; padding-inline: 3px; font-size: .73rem; }
+  .site-nav {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    justify-content: flex-start;
+    gap: 5px;
+    margin-inline: -2px;
+    padding: 1px 2px 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .site-nav::-webkit-scrollbar { display: none; }
+  .nav-link { flex: 0 0 auto; min-height: 31px; padding: 5px 9px; font-size: .8rem; }
+  .wrap { padding-inline: var(--gutter); }
+  .home-intro { padding-top: 22px; }
+  .page-intro { padding-top: 23px; }
+  .page-section { padding-top: 14px; }
+  .albums-grid, .albums-grid-large, .movies-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
+  .album-card, .movie-card, .albums-grid-large .album-card { padding: 5px; }
+  .album-cover, .movie-cover { width: 100%; height: auto; }
+  .filter-panel {
+    margin: 0 0 14px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255,255,245,.025);
+  }
+  .filter-panel > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 10px 13px;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    color: var(--ink);
+    font-size: .86rem;
+    font-weight: 700;
+  }
+  .filter-panel > summary::-webkit-details-marker { display: none; }
+  .filter-panel > summary::marker { content: ""; }
+  .filter-panel[open] > summary { border-bottom: 1px solid var(--rule); }
+  .filter-panel > summary .filter-summary-label { min-width: 0; }
+  .filter-summary-count, .filter-summary-detail { font-size: .72rem; }
+  .filter-panel .filter-bar {
+    display: flex;
+    gap: 9px;
+    margin: 0 !important;
+    padding: 12px;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .filter-bar label { flex: 1 1 calc(50% - 8px); min-width: 0; gap: 5px; font-size: .73rem; }
+  .filter-bar .filter-search { flex: 1 1 100%; }
+  .filter-bar input, .filter-bar select { min-height: 39px; padding: 7px 8px; font-size: .8rem; }
+  .filter-count { flex: 1 1 100%; width: 100%; margin: 0; }
+  .advanced-search-controls { grid-template-columns: minmax(0,1fr); gap: 10px; padding: 12px; }
+  .advanced-search-controls .advanced-query-label { grid-column: 1; grid-row: 1; }
+  .advanced-search-controls .advanced-submit { grid-column: 1; grid-row: 2; width: 100%; }
+  .advanced-options-panel { grid-column: 1; grid-row: 3; }
+  .advanced-search-options { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 11px; }
+  .advanced-options-panel.filter-panel { margin: 0; background: rgba(255,255,255,.025); }
+  .advanced-options-panel .filter-panel-summary { min-height: 44px; }
+  .album-detail-hero { padding: 23px 0 25px; }
+  .album-detail-head { --album-art-width: 124px; --album-art-gap: 15px; grid-template-columns: minmax(100px, var(--album-art-width)) minmax(0,1fr); align-items: start; gap: var(--album-art-gap); }
+  .album-detail-art { max-width: 124px; border-radius: 9px; }
+  .album-detail-copy h1 { margin-bottom: 7px; font-size: clamp(1.35rem, 6.4vw, 2rem); line-height: 1.08; }
+  .album-detail-copy .eyebrow { font-size: .61rem; letter-spacing: .11em; }
+  .album-telugu { font-size: .98rem; }
+  .album-byline { margin-top: 8px; font-size: .81rem; line-height: 1.4; }
+  .album-stats { font-size: .75rem; line-height: 1.45; }
+  .album-detail-copy .actions { width: calc(100% + var(--album-art-width) + var(--album-art-gap)); margin: 12px 0 5px calc(-1 * (var(--album-art-width) + var(--album-art-gap))); gap: 6px; }
+  .album-detail-copy .btn { min-height: 36px; padding: 7px 9px; font-size: .74rem; }
+  .album-detail-copy .section-note { font-size: .74rem; }
+  .album-release-details { padding-top: 17px; }
+  .album-detail-page .tracks a { grid-template-columns: 25px 40px minmax(0,1fr) auto; gap: 8px; }
+  .album-detail-page .track-artwork { width: 40px; height: 40px; }
+  .btn { min-height: 36px; padding: 7px 10px; font-size: .78rem; }
+  .actions { gap: 6px; }
+  .site-footer { padding-inline: var(--gutter); }
+}
+@media (max-width: 380px) {
+  .brand-wordmark { width: 120px; }
+  .brand-badge { font-size: .48rem; }
+  .header-search { grid-template-columns: minmax(0,1fr) 31px auto; gap: 3px; }
+  .header-search button { width: 30px; height: 30px; }
+  .advanced-search-link { font-size: .68rem; }
+  .album-detail-head { --album-art-width: 100px; --album-art-gap: 11px; grid-template-columns: minmax(88px, var(--album-art-width)) minmax(0,1fr); gap: var(--album-art-gap); }
+  .album-detail-copy .actions { width: calc(100% + var(--album-art-width) + var(--album-art-gap)); margin-left: calc(-1 * (var(--album-art-width) + var(--album-art-gap))); }
+  .album-detail-copy h1 { font-size: clamp(1.25rem, 6.5vw, 1.55rem); }
+  .album-detail-copy .btn { padding-inline: 7px; font-size: .7rem; }
+  .filter-bar { padding: 10px !important; }
+  .tracks a { gap: 6px; }
+  .meta { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .filter-summary-chevron, .btn, .nav-link { transition: none !important; }
+}
+@media (max-width: 800px) {
+  /* Defensively preserve the native disclosure hiding behavior even after a
+     child control's own display styling is applied. */
+  .filter-panel:not([open]) > :not(summary) { display: none !important; }
 }

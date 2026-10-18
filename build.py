@@ -477,7 +477,7 @@ def layout(cfg, site_url, *, title, desc, path, body, og_type="website", og_imag
 <body>
 <header class="site-header">
   <div class="header-inner">
-    <a class="brand" href="/" aria-label="vachikatelugu home"><span class="brand-mark"><img class="brand-logo logo-for-light" src="/static/vachika-logo-light.png" alt="" width="24" height="45"><img class="brand-logo logo-for-dark" src="/static/vachika-logo-dark.png" alt="" width="24" height="45"></span><span class="brand-name">{e(cfg["name"])}</span></a>
+    <a class="brand" href="/" aria-label="Vachika home"><img class="brand-wordmark" src="/static/vachika-wordmark.png" alt="Vachika" width="160" height="37"><span class="brand-badge" aria-hidden="true">MUSIC</span></a>
     <nav class="site-nav" aria-label="Main navigation">
       <a class="nav-link{' active' if path == '/' else ''}" href="/">Home</a>
       <a class="nav-link{' active' if path == '/songs/' else ''}" href="/songs/">Songs</a>
@@ -825,15 +825,18 @@ def albums_page(cfg, site_url, movies):
   <p class="intro-meta">{len(albums)} albums <span aria-hidden="true">·</span> {e(format_count(total_plays))} combined track plays in the current data</p>
 </section>
 <section class="wrap page-section">
-  <div class="filter-bar" id="album-filters" aria-label="Filter albums">
+  <details class="filter-panel" id="album-filter-panel" open>
+    <summary class="filter-panel-summary"><span class="filter-summary-label">Filters and sorting</span><span class="filter-summary-count" id="album-filter-summary-count">{len(albums)} albums</span><span class="filter-summary-chevron" aria-hidden="true"></span></summary>
+    <div class="filter-bar" id="album-filters" aria-label="Filter albums">
     <label class="filter-search">Find an album<input id="album-query" type="search" placeholder="Album or film title" autocomplete="off"></label>
     <label>Sort by<select id="album-sort"><option value="plays">Most played</option><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
     <label>Music director<select id="album-artist"><option value="">All artists</option>{artist_options}</select></label>
     <label>Movie genre<select id="album-genre"><option value="">All genres</option>{"".join(f'<option value="{e(g.lower())}">{e(g)}</option>' for g in genres)}</select></label>
     <label>Released from<input type="date" id="album-from" aria-label="Album release from date"></label>
     <label>Released to<input type="date" id="album-to" aria-label="Album release to date"></label>
-    <p class="filter-count" id="album-count" aria-live="polite">{len(albums)} albums</p>
-  </div>
+      <p class="filter-count" id="album-count" aria-live="polite">{len(albums)} albums</p>
+    </div>
+  </details>
   <ul class="albums-grid albums-grid-large" id="album-grid">{items}</ul>
   <p class="empty" id="album-empty" hidden>No albums match those filters. Try a different title, artist or sort option.</p>
   <p class="data-note">Play counts are captured provider snapshots, not live analytics. Album totals add the listed YouTube Music plays for songs on that album; missing counts contribute zero. Release sorting uses an album release date where available and otherwise the film release year.</p>
@@ -859,7 +862,9 @@ def movies_page(cfg, site_url, movies):
   <p class="intro-meta">{len(movies)} movies in the database</p>
 </section>
 <section class="wrap page-section">
-  <div class="filter-bar movie-filter-bar" id="movie-filters" aria-label="Filter movies">
+  <details class="filter-panel" id="movie-filter-panel" open>
+    <summary class="filter-panel-summary"><span class="filter-summary-label">Filters and sorting</span><span class="filter-summary-count" id="movie-filter-summary-count">{len(movies)} movies</span><span class="filter-summary-chevron" aria-hidden="true"></span></summary>
+    <div class="filter-bar movie-filter-bar" id="movie-filters" aria-label="Filter movies">
     <label class="filter-search">Find a movie<input id="movie-query" type="search" placeholder="Movie title" autocomplete="off"></label>
     <label>Sort by<select id="movie-sort"><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
     <label>Genre<select id="movie-genre"><option value="">All genres</option>{genre_options}</select></label>
@@ -867,8 +872,9 @@ def movies_page(cfg, site_url, movies):
     <label>Director<select id="movie-director"><option value="">All directors</option>{director_options}</select></label>
     <label>Released from<input type="date" id="movie-from" aria-label="Movie release from date"></label>
     <label>Released to<input type="date" id="movie-to" aria-label="Movie release to date"></label>
-    <p class="filter-count" id="movie-count" aria-live="polite">{len(movies)} movies</p>
-  </div>
+      <p class="filter-count" id="movie-count" aria-live="polite">{len(movies)} movies</p>
+    </div>
+  </details>
   <ul class="movies-grid" id="movie-grid">{items}</ul>
   <p class="empty" id="movie-empty" hidden>No movies match those filters. Try changing the title, genre or director.</p>
 </section>
@@ -897,7 +903,9 @@ def songs_page(cfg, site_url, movies):
   <p class="intro-meta">{len(songs)} songs across {len(movies)} movies</p>
 </section>
 <section class="wrap page-section">
-  <div class="filter-bar song-filter-bar" id="song-filters" aria-label="Filter songs">
+  <details class="filter-panel" id="song-filter-panel" open>
+    <summary class="filter-panel-summary"><span class="filter-summary-label">Filters and sorting</span><span class="filter-summary-count" id="song-filter-summary-count">{len(songs)} songs</span><span class="filter-summary-chevron" aria-hidden="true"></span></summary>
+    <div class="filter-bar song-filter-bar" id="song-filters" aria-label="Filter songs">
     <label class="filter-search">Search songs<input id="song-query" type="search" placeholder="Song, film or singer" autocomplete="off"></label>
     <label>Sort by<select id="song-sort"><option value="plays">Most played</option><option value="release-new">Newest movie</option><option value="release-old">Oldest movie</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option></select></label>
     <label>Singer / artist<select id="song-artist"><option value="">All singers</option>{artist_options}</select></label>
@@ -906,8 +914,9 @@ def songs_page(cfg, site_url, movies):
     {genre_filter_markup}
     <label>Movie released from<input id="song-from" type="date" aria-label="Movie release from date"></label>
     <label>Movie released to<input id="song-to" type="date" aria-label="Movie release to date"></label>
-    <p class="filter-count" id="song-count" aria-live="polite">{len(songs)} songs</p>
-  </div>
+      <p class="filter-count" id="song-count" aria-live="polite">{len(songs)} songs</p>
+    </div>
+  </details>
   <ol class="tracks chart-tracks" id="song-grid">{rows}</ol>
   <p class="empty" id="song-empty" hidden>No songs match those filters. Try a different artist, genre or release range.</p>
 </section>
@@ -925,18 +934,23 @@ def advanced_search_page(cfg, site_url):
 <section class="wrap page-section advanced-search-page">
   <form id="advanced-search-form" class="advanced-search-controls" role="search">
     <label class="advanced-query-label">Search term<input id="advanced-query" type="search" placeholder="Try a title, singer, director, genre or IMDb ID" autocomplete="off" autofocus></label>
-    <label>Search type<select id="advanced-type"><option value="all">Everything</option><option value="song">Songs</option><option value="album">Albums</option><option value="movie">Movies</option></select></label>
-    <label>Release from<input id="advanced-from" type="date"></label>
-    <label>Release to<input id="advanced-to" type="date"></label>
-    <label>Sort results<select id="advanced-sort"><option value="relevance">Best match</option><option value="popular">Most played</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option></select></label>
     <button type="submit" class="btn primary advanced-submit">Search database</button>
+    <details class="filter-panel advanced-options-panel" id="advanced-options-panel" open>
+      <summary class="filter-panel-summary"><span class="filter-summary-label">Search options</span><span class="filter-summary-detail">Type, dates and sorting</span><span class="filter-summary-chevron" aria-hidden="true"></span></summary>
+      <div class="advanced-search-options">
+        <label>Search type<select id="advanced-type"><option value="all">Everything</option><option value="song">Songs</option><option value="album">Albums</option><option value="movie">Movies</option></select></label>
+        <label>Release from<input id="advanced-from" type="date"></label>
+        <label>Release to<input id="advanced-to" type="date"></label>
+        <label>Sort results<select id="advanced-sort"><option value="relevance">Best match</option><option value="popular">Most played</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option></select></label>
+      </div>
+    </details>
   </form>
   <div class="advanced-results-head"><h2>Results</h2><p id="advanced-count" class="filter-count" aria-live="polite">Enter a term to search the database.</p></div>
   <div id="advanced-results" class="advanced-results-grid" aria-live="polite"></div>
   <p id="advanced-empty" class="empty" hidden>No matching records. Try a broader term, another type, or adjust the release-date range.</p>
 </section>
 """
-    return layout(cfg, site_url, title="Advanced database search", desc="Search all Vachika Telugu songs, albums and movies with type, release-date and sorting filters.", path="/advanced-search/", body=body)
+    return layout(cfg, site_url, title="Advanced database search", desc="Search Telugu songs, albums and movies in Vachika with type, release-date and sorting filters.", path="/advanced-search/", body=body)
 
 
 def chart_entity_row(entity, rank, kind):
@@ -1212,8 +1226,8 @@ def album_page(cfg, site_url, album):
     details_markup = facts(detail_rows)
     genre_text = ", ".join(movie["genres"])
     body = f"""
-<article class="album-detail-page detail-art-theme" style="--artwork-url: url('{e(art or "")}')">
-  <section class="album-detail-hero" style="--artwork-url: url('{e(art or "")}')">
+<article class="album-detail-page">
+  <section class="album-detail-hero">
     <div class="wrap album-detail-head">
       {cover}
       <div class="album-detail-copy">

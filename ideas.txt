@@ -1,5 +1,1 @@
-2. solve all the bugs in mobile veiw and clean buttons
-
-3. c:\Users\rohit\Pictures\Screenshots\Screenshot (262).png use glassly header like this website https://developers.cloudflare.com/
-
-5. animated logo on entry and making the website logo clean like it is square and not looking good change it
+animated logo on entry and making the website logo clean like it is square and not looking good change it

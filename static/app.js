@@ -44,7 +44,7 @@
       })
       .catch(function (error) {
         indexPromise = null;
-        console.error("Unable to load vachikatelugu search data", error);
+        console.error("Unable to load Vachika search data", error);
         throw error;
       });
     return indexPromise;
@@ -274,7 +274,27 @@
     }
   }
 
-  // Album and movie filter controls progressively enhance the statically sorted grids.
+  // Keep catalogue filters expanded on desktop, collapsed by default on phones.
+  // Native <details> preserves keyboard and no-JavaScript accessibility.
+  function initResponsiveFilterPanels() {
+    var panels = Array.prototype.slice.call(document.querySelectorAll(".filter-panel"));
+    if (!panels.length || !window.matchMedia) return;
+    var mobile = window.matchMedia("(max-width: 800px)");
+    function syncPanels() {
+      panels.forEach(function (panel) { panel.open = !mobile.matches; });
+    }
+    syncPanels();
+    if (typeof mobile.addEventListener === "function") mobile.addEventListener("change", syncPanels);
+    else if (typeof mobile.addListener === "function") mobile.addListener(syncPanels);
+  }
+
+  function syncFilterSummaryCount(countId, summaryId) {
+    var count = document.getElementById(countId);
+    var summary = document.getElementById(summaryId);
+    if (count && summary) summary.textContent = count.textContent;
+  }
+
+  // Catalogue filters progressively enhance the statically sorted grids.
   function applyAlbumFilters() {
     var grid = document.getElementById("album-grid");
     var query = document.getElementById("album-query");
@@ -315,6 +335,7 @@
       visible.forEach(function (card) { card.hidden = false; grid.appendChild(card); });
       cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
       if (count) count.textContent = visible.length + (visible.length === 1 ? " album" : " albums");
+      syncFilterSummaryCount("album-count", "album-filter-summary-count");
       if (noResults) noResults.hidden = visible.length > 0;
     }
     query.addEventListener("input", update);
@@ -364,6 +385,7 @@
       visible.forEach(function (card) { card.hidden = false; grid.appendChild(card); });
       cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
       if (count) count.textContent = visible.length + (visible.length === 1 ? " movie" : " movies");
+      syncFilterSummaryCount("movie-count", "movie-filter-summary-count");
       if (noResults) noResults.hidden = visible.length > 0;
     }
     [query, sort, genre, music, director, from, to].forEach(function (control) {
@@ -414,6 +436,7 @@
       visible.forEach(function (card, i) { card.hidden = false; var n = card.querySelector(".n"); if (n) n.textContent = String(i + 1); grid.appendChild(card); });
       cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
       if (count) count.textContent = visible.length + (visible.length === 1 ? " song" : " songs");
+      syncFilterSummaryCount("song-count", "song-filter-summary-count");
       if (noResults) noResults.hidden = visible.length > 0;
     }
     [query, sort, artist, lyricist, music, genre, from, to].forEach(function (control) {
@@ -520,8 +543,10 @@
     var icon = button.querySelector(".theme-toggle-icon");
     var saved = null;
     try { saved = localStorage.getItem("vachikatelugu-theme"); } catch (error) {}
+    // Vachika opens in its dark, artwork-friendly theme unless the visitor has
+    // explicitly chosen light mode before. The theme toggle remains available.
     if (saved === "dark" || saved === "light") root.setAttribute("data-theme", saved);
-    else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) root.setAttribute("data-theme", "light");
+    else root.setAttribute("data-theme", "dark");
     function reflect() {
       var light = root.getAttribute("data-theme") === "light";
       button.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
@@ -537,6 +562,7 @@
     reflect();
   }
 
+  initResponsiveFilterPanels();
   applyAlbumFilters();
   applyMovieFilters();
   applySongFilters();

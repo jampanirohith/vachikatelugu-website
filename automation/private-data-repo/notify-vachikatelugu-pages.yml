@@ -1,4 +1,4 @@
-name: Validate catalogue and trigger VachikaTelugu deployment
+name: Validate catalogue and trigger Vachika deployment
 
 on:
   push:
