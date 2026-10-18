@@ -1459,9 +1459,13 @@ def main():
         write(DIST / route.strip("/") / "index.html", song_page(cfg, site_url, song))
         urls.append(route)
 
-    # Maintain legacy movie and album routes. Song aliases map only from the
-    # provider ID previously chosen by the old builder; ambiguous IDs are omitted.
+    # Maintain the most useful legacy routes within Cloudflare Pages' static
+    # redirect budget. Canonical routes are stable, and the old IMDb-nested
+    # `/tt.../album/` aliases are redundant with `/album/<movie-slug>/` and can
+    # consume hundreds of rules on a larger catalogue. Keep the human-readable
+    # movie/album aliases and old provider-ID song aliases instead.
     redirect_rules: set[str] = set()
+    deprecated_nested_album_redirects: set[str] = set()
     for movie in movies:
         canonical_movie = movie_path(movie)
         canonical_album = album_path(movie)
@@ -1470,9 +1474,11 @@ def main():
             if legacy_movie != canonical_movie:
                 redirect_rules.add(f"{legacy_movie} {canonical_movie} 301")
             if movie["albums"]:
-                for legacy_album in (f'{canonical_movie}album/', f'/album/{movie["slug"]}/'):
-                    if legacy_album != canonical_album:
-                        redirect_rules.add(f"{legacy_album} {canonical_album} 301")
+                # Keep the human-readable old album route. The IMDb-nested album
+                # route is deliberately retired to avoid exceeding Pages limits.
+                legacy_album = f'/album/{movie["slug"]}/'
+                if legacy_album != canonical_album:
+                    redirect_rules.add(f"{legacy_album} {canonical_album} 301")
 
     legacy_id_targets: dict[str, set[str]] = {}
     for song in songs:
@@ -1486,13 +1492,16 @@ def main():
         target = next(iter(targets))
         if old_id != target:
             redirect_rules.add(f"/song/{old_id}/ /song/{target}/ 301")
-    # Cloudflare Pages supports a limited number of static _redirects rules. Fail
-    # loudly rather than silently ship an oversized redirect file if the catalogue
-    # grows beyond that budget; a Worker-based mapping can replace it later.
-    if len(redirect_rules) > 1900:
+
+    # Keep a margin below Cloudflare Pages' limit of 2,000 static _redirects
+    # entries. The former IMDb-nested album aliases are omitted above; the main
+    # human-readable movie, album and legacy song redirects are retained.
+    redirect_budget = 1950
+    if len(redirect_rules) > redirect_budget:
         raise SystemExit(
-            f"Generated {len(redirect_rules)} redirect rules. This is near the Cloudflare Pages "
-            "static _redirects limit; migrate legacy song route mapping to a Worker before publishing."
+            f"Generated {len(redirect_rules)} required legacy redirect rules, above the safe "
+            f"budget of {redirect_budget}. Cloudflare Pages allows 2,000 static _redirects rules; "
+            "move the overflow to Cloudflare Bulk Redirects or a Pages Function before publishing."
         )
     if redirect_rules:
         write(DIST / "_redirects", "\n".join(sorted(redirect_rules)) + "\n")
