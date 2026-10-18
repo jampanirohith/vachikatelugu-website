@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = ROOT / ".build-data" / "vachikatelugu.db"
 LOCAL_DB = ROOT / "vachikatelugu.db"
-SUPPORTED_SCHEMA_VERSION = "4"
+SUPPORTED_SCHEMA_VERSION = "5"
 
 REQUIRED_TABLES = {
     "schema_metadata", "movies", "albums", "songs", "artists", "lyricists",
