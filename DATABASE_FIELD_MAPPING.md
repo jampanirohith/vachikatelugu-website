@@ -1,6 +1,6 @@
 # Database-to-website field map
 
-This document records the display and privacy policy for the normalized SQLite schema used by the website. Row counts below describe the supplied `vachikatelugu(2).db` snapshot only; counts change as the private data repository is updated. This file contains no database data or credentials.
+This document records the display and privacy policy for the normalized SQLite schema used by the website. Row counts below describe the supplied `vachikatelugu.db` snapshot only; counts change as the private data repository is updated. This file contains no database data or credentials.
 
 ## Source-of-truth rules
 
@@ -11,33 +11,35 @@ This document records the display and privacy policy for the normalized SQLite s
 5. Missing optional values are omitted. Missing media, genres or lyrics do not remove an otherwise valid song page.
 6. `source_album_matches`, raw source blobs, provenance, source status, internal matching values and provider-maintenance fields are not exposed as visitor-facing metadata.
 
-## Snapshot coverage
+## Snapshot coverage (uploaded schema-v5 database)
+
+These values describe the uploaded `vachikatelugu.db` snapshot only; the private repository may change them over time.
 
 | Table | Rows | Public use |
 |---|---:|---|
-| `schema_metadata` | 1 | Requires schema version 4. |
-| `movies` | 4 | Public film pages and shared film context. |
-| `movie_genres` | 11 | Film genres; normalized rows are authoritative. |
-| `movie_people` | 46 | Film credits; role and credit ordering retained. |
-| `movie_links` | 23 | Validated external film/soundtrack links. |
-| `ott_availability` | 15 | Streaming/rent/buy availability links. |
-| `albums` | 4 | Album pages and song-to-album relationships. |
-| `songs` | 25 | Canonical song pages and track metadata. |
-| `artists` | 35 | Artist names for song credits. |
-| `song_artists` | 45 | Normalized artist credits and credit roles/order. |
-| `lyricists` | 15 | Lyricist names. |
-| `song_lyricists` | 20 | Normalized lyricist credits and order. |
-| `song_media` | 19 | Track-level provider links, player IDs and video details. |
+| `schema_metadata` | 1 | Confirms schema version 5. |
+| `movies` | 45 | Public film pages and shared film context. |
+| `movie_genres` | 119 | Film genres; normalized rows are authoritative. |
+| `movie_people` | 515 | Film credits; role and credit ordering retained. |
+| `movie_links` | 243 | Validated external film/soundtrack links. |
+| `ott_availability` | 117 | Streaming/rent/buy availability links. |
+| `albums` | 45 | Album pages and song-to-album relationships. |
+| `songs` | 243 | Canonical song pages and track metadata. |
+| `artists` | 246 | Artist names for song credits. |
+| `song_artists` | 424 | Normalized artist credits and credit roles/order. |
+| `lyricists` | 41 | Lyricist names. |
+| `song_lyricists` | 97 | Normalized lyricist credits and order. |
+| `song_media` | 351 | Track-level provider links, player IDs and video details. |
 | `song_genres` | 0 | Track-level genres; filter stays hidden while empty. |
-| `source_album_matches` | 8 | Internal candidate/source matching only; not public. |
+| `source_album_matches` | 77 | Internal candidate/source matching only; not public. |
 
-The sample has 14 songs with media records and 11 without them. No current song has LRC/plain lyrics populated. All 25 tracks have their own `song_id`, and all 25 receive a generated canonical song page.
+All 45 processed movies have all three IMDb values needed for rating/vote display and sorting. All 243 songs have at least one `song_media` row, so every song currently has at least one provider-backed media record. The snapshot has no populated LRC/plain lyrics and no normalized song-genre relationships. All 243 tracks still receive canonical song pages regardless of lyrics or track genres.
 
 ## Every table and column
 
 ### `schema_metadata`
 
-- `key`, `value`: used to check `schema_version = 4`; not shown to visitors.
+- `key`, `value`: used to check `schema_version = 5`; not shown to visitors.
 
 ### `movies`
 

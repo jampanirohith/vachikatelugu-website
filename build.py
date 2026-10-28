@@ -322,17 +322,30 @@ def load_movies():
         ytm_url = text_or_none(ytm.get("url")) or (f"https://music.youtube.com/watch?v={ytm_id}" if ytm_id else None)
         youtube_url = text_or_none(youtube.get("url")) or (f"https://www.youtube.com/watch?v={youtube_id}" if youtube_id else None)
 
-        sec = raw.get("duration_sec")
-        ms = raw.get("duration_ms")
+        raw_sec = raw.get("duration_sec")
+        raw_ms = raw.get("duration_ms")
         try:
-            sec = int(sec) if sec is not None else (int(ms) // 1000 if ms is not None else None)
+            sec = int(raw_sec) if raw_sec is not None else (int(raw_ms) // 1000 if raw_ms is not None else None)
         except (TypeError, ValueError):
             sec = None
         try:
-            ms = int(ms) if ms is not None else (sec * 1000 if sec is not None else None)
+            ms = int(raw_ms) if raw_ms is not None else (sec * 1000 if sec is not None else None)
         except (TypeError, ValueError):
             ms = sec * 1000 if sec is not None else None
-        duration = text_or_none(raw.get("duration_formatted"))
+
+        # The public duration string is the human-reviewed source shown across the UI.
+        # A subset of imported rows has stale duration_sec/duration_ms values; prefer
+        # the formatted value so the drawer, search index and JSON-LD agree with it.
+        duration = text_or_none(raw.get("duration_formatted")) or ""
+        if duration and re.fullmatch(r"\d{1,4}:\d{2}", duration):
+            minutes, seconds = duration.split(":", 1)
+            if int(seconds) < 60:
+                sec = int(minutes) * 60 + int(seconds)
+                ms = sec * 1000
+            else:
+                duration = ""
+        else:
+            duration = ""
         if not duration and sec is not None and sec >= 0:
             duration = f"{sec // 60}:{sec % 60:02d}"
         if duration and not re.fullmatch(r"\d{1,4}:\d{2}", duration):
@@ -505,10 +518,10 @@ def layout(cfg, site_url, *, title, desc, path, body, og_type="website", og_imag
   <p class="eyebrow drawer-kicker">TELUGU SOUNDTRACK</p>
   <h2 id="drawer-title">Song details</h2>
   <p class="drawer-film" id="drawer-film"></p>
+  <div class="drawer-actions" id="drawer-actions"></div>
   <p class="drawer-album-link"><a id="drawer-album-link" href="/albums/">Open soundtrack album ↗</a></p>
   <p class="drawer-artists" id="drawer-artists"></p>
   <div class="drawer-facts" id="drawer-facts"></div>
-  <div class="drawer-actions" id="drawer-actions"></div>
   <div id="drawer-player-area" class="drawer-player-area"></div>
   <a id="drawer-full-details" class="btn drawer-full-details" href="/" data-full-song-link>Open full song page ↗</a>
 </aside>
@@ -753,16 +766,26 @@ def movie_card(movie, *, eager=False):
     music = "|".join(movie["music_directors"])
     directors = "|".join(movie["directors"])
     release = movie["released"] or (movie["year"] + "-01-01")
+    try:
+        imdb_votes_numeric = max(0, int(movie.get("imdb_votes_numeric") or 0))
+    except (TypeError, ValueError):
+        imdb_votes_numeric = 0
+    imdb_score = str(movie.get("imdb_score") or "").strip()
+    imdb_votes = str(movie.get("imdb_votes") or "").strip()
     loading = "eager" if eager else "lazy"
     cover = (f'<img class="movie-cover" src="{e(artwork)}" alt="Poster for {e(movie["title"])}" width="500" height="750" '
              f'loading="{loading}" decoding="async" referrerpolicy="no-referrer">'
              if artwork else '<span class="movie-cover movie-cover-empty" aria-hidden="true">▣</span>')
+    rating = (f'<span class="movie-card-rating"><strong>IMDb {e(imdb_score)}</strong>'
+              f'{f"<span aria-hidden=\"true\">·</span><span>{e(imdb_votes)} votes</span>" if imdb_votes else ""}</span>'
+              if imdb_score else "")
     return (
         f'<li class="movie-item" data-title="{e(movie["title"].lower())}" data-release="{e(release)}" '
         f'data-year="{e(movie["year"])}" data-genre="{e(genres.lower())}" data-music="{e(music.lower())}" '
-        f'data-director="{e(directors.lower())}" data-songs="{count}">'
+        f'data-director="{e(directors.lower())}" data-songs="{count}" data-imdb-votes="{imdb_votes_numeric}">'
         f'<a class="movie-card" href="{e(movie_path(movie))}">{cover}'
         f'<span class="movie-card-title">{e(movie["title"])}</span>'
+        f'{rating}'
         f'<span class="sub">{e(movie["year"])} · {count} {"song" if count == 1 else "songs"}</span>'
         f'<span class="movie-card-genre">{e(", ".join(movie["genres"][:2]))}</span>'
         f'</a></li>'
@@ -783,12 +806,21 @@ def home_page(cfg, site_url, movies):
   <p class="eyebrow">TELUGU SOUNDTRACK ARCHIVE</p>
   <h1>Every song has a story.</h1>
   <p class="lede">Discover songs, albums and the films behind them.</p>
-  <div class="home-stats"><span>{len(all_songs)} songs</span><span>{len(all_albums)} albums</span></div>
+  <form role="search" action="/" method="get" class="home-search" id="home-search-form">
+    <label class="sr" for="home-q">Search songs, films, albums, singers and music directors</label>
+    <div class="home-search-shell">
+      <input id="home-q" name="q" type="search" placeholder="Search songs, films, albums, singers…" autocomplete="off" enterkeyhint="search" aria-controls="results">
+      <button type="submit" class="home-search-button"><span class="home-search-glyph" aria-hidden="true">⌕</span><span>Search catalogue</span></button>
+    </div>
+    <a class="home-advanced-link" href="/advanced-search/">Advanced search and filters <span aria-hidden="true">↗</span></a>
+  </form>
+  <div class="home-stats"><span>{len(all_songs)} songs</span><span>{len(all_albums)} albums</span><span>{len(movies)} movies</span></div>
 </section>
 
 <div id="results" class="wrap search-results" hidden>
   <section id="song-results" hidden><h2>Songs</h2><ol class="tracks" id="song-list"></ol></section>
-  <section id="film-results" hidden><h2>Films</h2><ol class="tracks" id="film-list"></ol></section>
+  <section id="album-results" hidden><h2>Albums</h2><ol class="tracks" id="album-list"></ol></section>
+  <section id="film-results" hidden><h2>Movies</h2><ol class="tracks" id="film-list"></ol></section>
   <p id="empty" class="empty" hidden></p>
 </div>
 <p id="status" class="sr" role="status" aria-live="polite"></p>
@@ -846,7 +878,8 @@ def albums_page(cfg, site_url, movies):
 
 
 def movies_page(cfg, site_url, movies):
-    ordered = sorted(movies, key=lambda m: (m["released"] or (m["year"] + "-01-01")), reverse=True)
+    # Render the default vote-count order into the HTML so it is correct before JS loads.
+    ordered = sorted(movies, key=lambda m: (-int(m.get("imdb_votes_numeric") or 0), m["title"].casefold()))
     items = "".join(movie_card(movie, eager=i < 4) for i, movie in enumerate(ordered))
     genres = sorted({genre for movie in movies for genre in movie["genres"] if genre}, key=str.casefold)
     artists = sorted({a for movie in movies for a in movie["music_directors"] if a}, key=str.casefold)
@@ -859,14 +892,14 @@ def movies_page(cfg, site_url, movies):
   <p class="eyebrow">FILMOGRAPHY</p>
   <h1>Movies</h1>
   <p class="lede">Browse films and jump into each movie's soundtrack, song credits and music links.</p>
-  <p class="intro-meta">{len(movies)} movies in the database</p>
+  <p class="intro-meta">{len(movies)} movies in the database · default order uses IMDb vote count</p>
 </section>
 <section class="wrap page-section">
   <details class="filter-panel" id="movie-filter-panel" open>
     <summary class="filter-panel-summary"><span class="filter-summary-label">Filters and sorting</span><span class="filter-summary-count" id="movie-filter-summary-count">{len(movies)} movies</span><span class="filter-summary-chevron" aria-hidden="true"></span></summary>
     <div class="filter-bar movie-filter-bar" id="movie-filters" aria-label="Filter movies">
     <label class="filter-search">Find a movie<input id="movie-query" type="search" placeholder="Movie title" autocomplete="off"></label>
-    <label>Sort by<select id="movie-sort"><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
+    <label>Sort by<select id="movie-sort"><option value="imdb-votes" selected>Most IMDb votes</option><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
     <label>Genre<select id="movie-genre"><option value="">All genres</option>{genre_options}</select></label>
     <label>Music director<select id="movie-music"><option value="">All music directors</option>{artist_options}</select></label>
     <label>Director<select id="movie-director"><option value="">All directors</option>{director_options}</select></label>
@@ -1394,6 +1427,8 @@ def build_search_index(movies):
             "originalLanguage": movie["original_language"], "runtimeMinutes": movie["runtime_minutes"],
             "ottProviders": [entry.get("provider") for entry in movie["ott_availability"]],
             "songs": len(movie["songs"]), "albums": len(movie["albums"]), "poster": movie["poster"],
+            "imdbScore": movie["imdb_score"], "imdbVotes": movie["imdb_votes"],
+            "imdbVotesNumeric": int(movie.get("imdb_votes_numeric") or 0),
             "artwork": album_art(movie.get("album"), movie), "playsNum": album_total_plays(movie),
             "albumReleased": movie["album"].get("released"),
         } for movie in movies],

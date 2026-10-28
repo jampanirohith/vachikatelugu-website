@@ -52,13 +52,13 @@ A push that changes `vachikatelugu.db` on `main` will run the database validatio
 A successful production build must show all of these:
 
 - `Fetched private SQLite database ...`
-- `SQLite validation passed ...` with schema version 4 and row counts
+- `SQLite validation passed ...` with schema version 5 and row counts
 - `build.py` reports all processed movies, albums and songs, including songs without media
 - `python3 check.py` ends with `ok`
 - `Public-output check passed ...`
 - Cloudflare reports the deployment as **Success**
 
-If `validate_database.py` fails, do not remove the check to force a deploy. Review the error and confirm the committed database matches normalized schema version 4. The website reads explicit columns and relationship tables; it does not depend on `movies.raw_json`, `albums.raw_json`, `songs.raw_json`, or provider/source JSON blobs. Songs without media IDs or lyrics remain valid and still receive pages. The generated `search-index.json` is derived during the build from normalized DB values, not an external source of truth.
+If `validate_database.py` fails, do not remove the check to force a deploy. Review the error and confirm the committed database matches normalized schema version 5. The website reads explicit columns and relationship tables; it does not depend on `movies.raw_json`, `albums.raw_json`, `songs.raw_json`, or provider/source JSON blobs. Songs without media IDs or lyrics remain valid and still receive pages. The generated `search-index.json` is derived during the build from normalized DB values, not an external source of truth.
 
 ## 5. Security notes
 

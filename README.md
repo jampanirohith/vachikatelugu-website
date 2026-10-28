@@ -22,7 +22,7 @@ Vachika is a static Telugu-film-music catalogue for discovering movies, soundtra
 
 ```text
 Private data repository (unchanged source of truth)
-  └── vachikatelugu.db (normalized SQLite schema v4)
+  └── vachikatelugu.db (normalized SQLite schema v5)
           │
           │ GitHub Actions validates DB commit
           ▼
@@ -115,7 +115,7 @@ See [`CLOUDFLARE_SETUP.md`](CLOUDFLARE_SETUP.md) for detailed setup and preview-
 
 The project includes a workflow template at `automation/private-data-repo/notify-vachikatelugu-pages.yml`. Install it in the private database repo at `.github/workflows/notify-vachikatelugu-pages.yml` and add `CLOUDFLARE_PAGES_DEPLOY_HOOK` as a GitHub Actions repository secret.
 
-When `vachikatelugu.db` changes on `main`, the workflow checks SQLite integrity, schema version 4, required normalized tables/columns, non-empty titles, unique stable song IDs, and song/album/movie relationships. It intentionally does not reject songs with no external media IDs or lyrics. Only a validated commit triggers the Cloudflare Pages build, which fetches the database as before. Full steps: [`automation/private-data-repo/README.md`](automation/private-data-repo/README.md).
+When `vachikatelugu.db` changes on `main`, the workflow checks SQLite integrity, schema version 5, required normalized tables/columns, non-empty titles, unique stable song IDs, and song/album/movie relationships. It intentionally does not reject songs with no external media IDs or lyrics. Only a validated commit triggers the Cloudflare Pages build, which fetches the database as before. Full steps: [`automation/private-data-repo/README.md`](automation/private-data-repo/README.md).
 
 ## Data model coverage
 
@@ -130,7 +130,7 @@ The build reads the relevant values from these schema areas:
 - `artists` + `song_artists` and `lyricists` + `song_lyricists`: normalized credits and their order.
 - `song_media`: provider IDs, validated external URLs and play/view snapshots.
 - `song_genres`: track-level genres. If this normalized table is empty, the track-genre filter is not shown; movie genres are not incorrectly treated as track genres.
-- `schema_metadata`: the adapter explicitly requires schema version `4` so a breaking schema change fails visibly rather than silently dropping data.
+- `schema_metadata`: the adapter explicitly requires schema version `5` so a breaking schema change fails visibly rather than silently dropping data.
 
 Fields reserved for ingestion, provenance, raw source snapshots, internal matching, provider popularity/library flags and normalized-name matching are deliberately not shown on public pages unless a specific user-facing feature later justifies them.
 

@@ -10,7 +10,7 @@ This workflow belongs in **`jampanirohith/telugumoviedb`**, not in the website r
 ## What the workflow validates
 
 - SQLite `quick_check` and `foreign_key_check`.
-- Schema version 4 and the normalized tables/columns the website reads.
+- Schema version 5 and the normalized tables/columns the website reads.
 - Non-empty processed catalogue, stable unique song IDs, non-empty titles, and song-to-album/movie relationship consistency.
 - It deliberately **does not** require Spotify/YouTube IDs, lyrics, or song genres. A song remains a valid catalogue entry even if it cannot currently be played on an external platform.
 

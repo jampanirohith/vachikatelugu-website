@@ -82,7 +82,7 @@ def main() -> None:
             if absent:
                 column_errors.append(f"{table}: {', '.join(absent)}")
         if column_errors:
-            fail("required schema-v4 columns are missing: " + " | ".join(column_errors))
+            fail("required schema-v5 columns are missing: " + " | ".join(column_errors))
 
         version_row = connection.execute(
             "SELECT value FROM schema_metadata WHERE key='schema_version'"

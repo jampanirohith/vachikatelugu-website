@@ -211,6 +211,8 @@ def main() -> None:
             fail("search-index song records are missing fields required by search/drawer", problems)
         if index.get("albums") and not all(key in index["albums"][0] for key in ("path", "title", "movieTitle", "songs")):
             fail("search-index album records are missing fields required by advanced search", problems)
+        if index.get("movies") and not all(key in index["movies"][0] for key in ("imdbScore", "imdbVotes", "imdbVotesNumeric")):
+            fail("search-index movie records are missing IMDb vote fields required by movie search/sorting", problems)
 
     # Core catalog pages should expose exactly the normalized content count.
     songs_html_path = DIST / "songs" / "index.html"
@@ -244,6 +246,41 @@ def main() -> None:
         for marker in ('id="movie-query"', 'id="movie-sort"', 'id="movie-genre"', 'id="movie-music"', 'id="movie-director"', 'class="movies-grid"'):
             if marker not in text:
                 fail(f"movies page missing expected filter/control: {marker}", problems)
+        if '<option value="imdb-votes" selected>Most IMDb votes</option>' not in text:
+            fail("movies page must default to Most IMDb votes sorting", problems)
+        ordered_movies = sorted(movies, key=lambda movie: (-int(movie.get("imdb_votes_numeric") or 0), movie["title"].casefold()))
+        first_card = re.search(r'<li class="movie-item"([^>]*)>', text)
+        if ordered_movies and first_card:
+            attrs = first_card.group(1)
+            first_title = re.search(r'data-title="([^"]*)"', attrs)
+            first_votes = re.search(r'data-imdb-votes="([0-9]+)"', attrs)
+            expected_title = str(ordered_movies[0]["title"]).lower()
+            expected_votes = str(max(0, int(ordered_movies[0].get("imdb_votes_numeric") or 0)))
+            if not first_title or unescape(first_title.group(1)) != expected_title:
+                fail(f"movies page static first card is not the highest IMDb-vote movie ({expected_title})", problems)
+            if not first_votes or first_votes.group(1) != expected_votes:
+                fail("movies page first-card IMDb vote count does not match the database", problems)
+        elif ordered_movies:
+            fail("movies page has no static movie cards to validate default sorting", problems)
+
+    home_path = DIST / "index.html"
+    if home_path.is_file():
+        home = home_path.read_text(encoding="utf-8")
+        for marker in ('id="home-search-form"', 'id="home-q"', 'id="album-results"', 'id="film-results"', 'id="song-results"'):
+            if marker not in home:
+                fail(f"homepage missing central search/result feature: {marker}", problems)
+        if 'src="/static/vachika-wordmark.png"' not in home:
+            fail("global header wordmark asset is missing from the homepage", problems)
+        actions_at = home.find('id="drawer-actions"')
+        album_at = home.find('id="drawer-album-link"')
+        artists_at = home.find('id="drawer-artists"')
+        if not (0 <= actions_at < album_at < artists_at):
+            fail("song drawer should place provider actions above album link and credits", problems)
+        css_path = ROOT / "static" / "style.css"
+        css = css_path.read_text(encoding="utf-8") if css_path.is_file() else ""
+        for marker in ("html[data-theme=\"light\"]", "--vachika-header-height", "display: block !important", "backdrop-filter: blur(30px)"):
+            if marker not in css:
+                fail(f"theme/drawer stylesheet missing expected glass/header rule: {marker}", problems)
 
     charts_path = DIST / "charts" / "index.html"
     if charts_path.is_file():

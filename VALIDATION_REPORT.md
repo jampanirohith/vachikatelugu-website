@@ -1,42 +1,41 @@
 # Build, UI and validation report
 
-## Database and catalogue verification
+## Uploaded SQLite database audit
 
-The website was rebuilt using the supplied SQLite snapshot `vachikatelugu(2).db`, schema version 4. The DB was opened read-only and was not included in the project ZIP.
+The supplied `vachikatelugu.db` snapshot is normalized SQLite schema version 5. The database was opened read-only for validation and the original file was not modified or included in the patch ZIP.
 
 - SQLite `PRAGMA quick_check`: `ok`.
-- `PRAGMA foreign_key_check`: no violations.
-- Processed catalogue: 4 movies, 4 albums, 25 songs.
-- Song credits: 45 normalized artist relationships and 20 normalized lyricist relationships.
-- Media coverage: 14 of 25 songs have media records; the other 11 still receive pages.
-- Lyrics coverage: this snapshot has no populated LRC/plain lyrics; fixture tests cover LRC, plain and empty lyrics rendering.
-- `song_genres` has no rows in this snapshot, so track-level genres and that filter are not fabricated from movie genres.
+- SQLite `PRAGMA foreign_key_check`: no violations.
+- Catalogue: 45 processed movies, 45 albums and 243 songs.
+- All 45 movies have poster/backdrop, IMDb score, display vote count, numeric IMDb vote count and plot summary.
+- All 243 songs have at least one media relationship and receive a canonical page; 240 have normalized artist credits, 97 have normalized lyricist relationships.
+- Lyrics coverage is 0/243 for both LRC and plain lyrics; `song_genres` has 0 rows.
+- Seven albums have a declared `total_tracks` value that differs from connected song rows; 17 movies have a declared `total_songs` value that differs from connected songs. The site calculates displayed track counts from normalized relationships instead of trusting these stale values.
+- 94 rows have a `duration_formatted` value that disagrees with `duration_sec`. The generated public model now consistently prefers a valid `duration_formatted` value and derives seconds/milliseconds from it for the UI/search projection. No DB values were written back.
 
-## Build and safety checks
+## Build and regression checks
 
-- `validate_database.py`: passed.
-- `build.py`: generated 4 movie pages, 4 album pages and all 25 song pages from normalized tables, plus shared static output.
-- `check.py`: passed page/index coverage, internal-link checks, media-independent song page coverage, metadata and lyrics fixture checks, plus source-JSON independence.
-- The source-JSON independence test emptied raw/serialized JSON blob columns in a temporary database copy and verified that the normalized catalogue model stayed identical. The original DB was untouched.
-- `check_public_output.py`: passed; the private SQLite database and internal source payloads are not published.
-- `python -m py_compile ...` and `node --check static/app.js`: passed.
-- A build with `SITE_URL=https://vachika.example` verified canonical URL, sitemap and robots output generation. Use the real production domain in Cloudflare settings.
+These checks were run with `DATABASE_PATH` set to the uploaded database:
 
-## UI changes and browser checks
+- `python validate_database.py`: passed schema-v5, SQLite integrity, foreign-key, required-column and relationship checks.
+- `python build.py`: generated 45 movie pages, 45 album pages, 243 song pages and a generated search index; no database file is copied into public output.
+- `python check.py`: passed route/page coverage, internal-link, lyric-fixture, source-JSON-independence, homepage-search and default IMDb-vote-sort regression checks.
+- `python check_public_output.py`: passed checks for private database leakage and unreviewed public search fields.
+- `node --check static/app.js` and `python -m py_compile build.py db_source.py validate_database.py check.py check_public_output.py`: passed.
 
-- Replaced the old header mark/name with the uploaded transparent Vachika wordmark, added the small MUSIC badge and redesigned navigation/search to follow the supplied Cloudflare Docs header reference.
-- Public branding and page-title suffix now use **Vachika**, while repository, SQLite filename and existing deploy-hook pipeline identifiers remain unchanged.
-- Default theme is dark for new visitors; an explicit saved light/dark preference is retained and the theme toggle still works.
-- Removed the strongly blurred album-cover background from album pages. The hero uses a subtle tonal background and clear, properly constrained cover artwork.
-- Filters on songs, albums and movies collapse behind a disclosure summary on mobile and remain open on desktop. Advanced-search options use the same mobile disclosure pattern.
-- Unified button shapes and tightened image, grid and long-text constraints to avoid horizontal overflow on narrow screens.
-- Browser-rendered layout checks ran at widths 320, 360, 390, 430, 700, 760, 768, 800, 820, 1024, 1280, 1440 and 1920 px. No horizontal overflow or browser-side JavaScript exceptions were found. Mobile filter open/close behavior and live result-count summary updates were tested.
-- For deterministic layout checks, remote artwork URLs were replaced in the isolated visual-test fixture with a local placeholder; the actual website code still uses the database's validated artwork URLs. Live third-party image availability was not tested.
+The build warns that `SITE_URL` is not set in the local validation environment, so canonical URLs and the sitemap are skipped here. Set `SITE_URL` to the real production domain in Cloudflare Pages. One ambiguous legacy song-ID redirect is skipped intentionally; the canonical song page still builds.
 
-## Asset note
+## UI changes included in this patch
 
-The supplied `wordmark.png` is a transparent PNG wordmark rather than an installable font file. It is shipped as `static/vachika-wordmark.png` and used for the website branding. Body text continues to use the existing Anek Telugu web-font stylesheet.
+- Obsidian-style black/glass dark theme plus a coordinated light/paper theme.
+- Dedicated centered homepage catalogue search with live song, album and movie results, followed by the existing catalogue content when the search is empty.
+- Restored/explicitly visible Vachika wordmark in the global header and corrected the legacy rotated nav-link styling.
+- Default Movies sort is highest numeric IMDb vote count first, including before JavaScript loads; dropdown sort remains functional.
+- Song click-to-open details drawer is docked to the right on desktop, measured below the live header height, and causes the header to compact. On smaller screens it remains an overlay drawer. Provider links/actions are placed near the top of the drawer rather than at its bottom.
+- Movie cards display rating and vote-count context. Search index includes only the reviewed IMDb score/vote fields needed for UI search/sorting.
+
+A real browser screenshot/viewport interaction pass was not completed for this patch in the current environment because the available headless Chromium process did not start reliably. The assertions above are reproducible build/static/syntax checks, not a claim that the live Cloudflare deployment or third-party media providers were browser-tested. Recheck responsive drawer behavior once deployed or in a normal local browser.
 
 ## Deployment architecture retained
 
-The private GitHub SQLite repository remains the source of truth. Its GitHub Action still validates a DB commit and triggers the existing Cloudflare Pages deploy hook. Cloudflare fetches the current private database during the build; visitors are served generated static pages and reviewed search JSON, never the SQLite file. The workflow already installed in the separate private repository cannot be edited from this ZIP, so compare it with the updated template if it still contains older validation rules.
+The private GitHub SQLite repository remains the source of truth. Cloudflare Pages fetches it during the build; the public site receives generated static pages and reviewed search JSON, never the SQLite file. This patch changes the website repository source and documentation only. It does not change the deployed Cloudflare project, its secrets, or the workflow already installed in the separate private DB repository.

@@ -36,3 +36,13 @@ The supplied asset is a transparent PNG wordmark, not an installable font file. 
 Using the supplied database snapshot and a clean build, checks passed for database schema/integrity, site generation, internal links, public-output privacy, Python syntax and JavaScript syntax. Browser layout and interaction checks ran at viewport widths 320, 360, 390, 430, 700, 760, 768, 800, 820, 1024, 1280, 1440 and 1920 pixels. No horizontal page overflow or browser-side JavaScript exceptions were observed. Mobile filter open/close behavior, Advanced Search option collapse and live result-count summaries were tested.
 
 Browser-only visual fixtures use placeholder artwork to avoid reliance on third-party network images. Real artwork URLs in the production output are unaffected. Production domain/Cloudflare configuration and the workflow installed in the separate private repository are not changed by this source archive.
+
+
+## 2026-10-28: catalogue search, IMDb ordering and glass drawer pass
+
+- Defaulted the Movies page to descending numeric IMDb vote count and rendered the same order into static HTML for no-JavaScript and first-paint correctness. Added vote-count display to movie cards and vote fields to the reviewed public search projection.
+- Added centered live homepage search covering songs, albums and movies, with the existing homepage sections restored when the query is cleared.
+- Applied a coordinated Obsidian-black glass dark palette and clean paper light palette across common controls/cards; made header wordmark visibility explicit and neutralized legacy rotated nav links.
+- Docked song detail drawer below the measured header on desktop, compacted the header while the drawer is open, preserved overlay mode on smaller screens, and moved provider actions toward the top of the drawer.
+- Normalized displayed and indexed duration seconds/milliseconds from valid `duration_formatted` values without rewriting the DB.
+- Added regression assertions for home search and static IMDb vote ordering. This patch's current environment did not permit a reliable headless Chromium visual run; refer to `VALIDATION_REPORT.md` for the exact checks run and remaining caveat.

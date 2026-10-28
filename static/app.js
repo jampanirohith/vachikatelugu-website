@@ -3,13 +3,17 @@
   document.documentElement.classList.add("js");
 
   var input = document.getElementById("q");
+  var homeInput = document.getElementById("home-q");
+  var homeSearchForm = document.getElementById("home-search-form");
   var searchForm = document.getElementById("global-search-form");
   var popover = document.getElementById("search-popover");
   var browse = document.getElementById("browse");
   var results = document.getElementById("results");
   var songSection = document.getElementById("song-results");
+  var albumSection = document.getElementById("album-results");
   var filmSection = document.getElementById("film-results");
   var songList = document.getElementById("song-list");
+  var albumList = document.getElementById("album-list");
   var filmList = document.getElementById("film-list");
   var empty = document.getElementById("empty");
   var status = document.getElementById("status");
@@ -191,7 +195,7 @@
   }
 
   function renderHomeResults(raw) {
-    if (!browse || !results || !songSection || !filmSection || !songList || !filmList || !empty) return;
+    if (!browse || !results || !songSection || !albumSection || !filmSection || !songList || !albumList || !filmList || !empty) return;
     var query = String(raw || "").trim();
     if (!query) {
       results.hidden = true;
@@ -201,26 +205,37 @@
     }
     if (!index) return;
     var songs = rankSongs(query, 40);
+    var albums = rankAlbums(query, 20);
     var movies = rankMovies(query, 20);
     songList.textContent = "";
+    albumList.textContent = "";
     filmList.textContent = "";
     songs.forEach(function (song, i) {
       songList.appendChild(makeSearchRow("/song/" + encodeURIComponent(song.id) + "/", i + 1,
         song.title, song.movieTitle + ", " + song.year, song.plays || ""));
     });
+    albums.forEach(function (album, i) {
+      albumList.appendChild(makeSearchRow(album.path, i + 1, album.title,
+        album.movieTitle + ", " + album.year,
+        album.songs + (album.songs === 1 ? " song" : " songs")));
+    });
     movies.forEach(function (movie, i) {
+      var voteLabel = movie.imdbVotes ? "IMDb " + (movie.imdbScore || "—") + " · " + movie.imdbVotes + " votes" : "";
+      var subtitle = [movie.year, voteLabel].filter(Boolean).join(" · ");
       filmList.appendChild(makeSearchRow(movie.path || ("/movie/" + encodeURIComponent(movie.slug) + "/"), i + 1,
-        movie.title, movie.year + (movie.genres && movie.genres.length ? " · " + movie.genres.slice(0, 2).join(", ") : ""),
+        movie.title, subtitle + (movie.genres && movie.genres.length ? " · " + movie.genres.slice(0, 2).join(", ") : ""),
         movie.songs + (movie.songs === 1 ? " song" : " songs")));
     });
     songSection.hidden = songs.length === 0;
+    albumSection.hidden = albums.length === 0;
     filmSection.hidden = movies.length === 0;
-    var none = songs.length + movies.length === 0;
+    var total = songs.length + albums.length + movies.length;
+    var none = total === 0;
     empty.hidden = !none;
-    empty.textContent = none ? "Nothing found for “" + query + "”. Try a movie title, a singer or part of a song title." : "";
+    empty.textContent = none ? "Nothing found for “" + query + "”. Try a song, movie, album, singer or music director." : "";
     results.hidden = false;
     browse.hidden = true;
-    if (status) status.textContent = none ? "No results" : songs.length + " songs and " + movies.length + " movies found";
+    if (status) status.textContent = none ? "No results" : songs.length + " songs, " + albums.length + " albums and " + movies.length + " movies found";
   }
 
   if (input) {
@@ -255,13 +270,42 @@
     });
   }
 
+  if (homeInput) {
+    function runHomeSearch() {
+      var value = homeInput.value.trim();
+      if (!value) {
+        renderHomeResults("");
+        return;
+      }
+      loadIndex().then(function () {
+        renderHomeResults(value);
+      }).catch(function () {
+        if (results && browse) {
+          results.hidden = false;
+          browse.hidden = true;
+          if (empty) {
+            empty.hidden = false;
+            empty.textContent = "Search could not load. Please refresh and try again.";
+          }
+        }
+      });
+    }
+    homeInput.addEventListener("input", runHomeSearch);
+    if (homeSearchForm) {
+      homeSearchForm.addEventListener("submit", function () {
+        homeInput.value = homeInput.value.trim();
+      });
+    }
+  }
+
   document.addEventListener("click", function (event) {
     if (popover && input && !event.target.closest(".header-search")) setPopoverOpen(false);
   });
 
   var initialQuery = new URLSearchParams(window.location.search).get("q");
-  if (input && initialQuery) {
-    input.value = initialQuery;
+  if (initialQuery) {
+    if (input) input.value = initialQuery;
+    if (homeInput) homeInput.value = initialQuery;
     if (browse && results) {
       loadIndex().then(function () { renderHomeResults(initialQuery); }).catch(function () {
         results.hidden = false;
@@ -376,6 +420,10 @@
       });
       var ordering = sort.value;
       visible.sort(function (a, b) {
+        if (ordering === "imdb-votes") {
+          return Number(b.dataset.imdbVotes || 0) - Number(a.dataset.imdbVotes || 0)
+            || (a.dataset.title || "").localeCompare(b.dataset.title || "");
+        }
         if (ordering === "release-old") return (a.dataset.release || "").localeCompare(b.dataset.release || "");
         if (ordering === "title-az") return (a.dataset.title || "").localeCompare(b.dataset.title || "");
         if (ordering === "title-za") return (b.dataset.title || "").localeCompare(a.dataset.title || "");
@@ -570,6 +618,18 @@
   initChartTabs();
   initThemeToggle();
 
+  // Keep the docked details panel below the real (responsive) header height.
+  var siteHeader = document.querySelector(".site-header");
+  function updateSiteHeaderHeight() {
+    if (!siteHeader) return;
+    var height = Math.ceil(siteHeader.getBoundingClientRect().height);
+    if (height > 0) document.documentElement.style.setProperty("--vachika-header-height", height + "px");
+  }
+  updateSiteHeaderHeight();
+  if (siteHeader) siteHeader.addEventListener("transitionend", function (event) {
+    if (event.target === siteHeader || event.target === siteHeader.querySelector(".header-inner")) updateSiteHeaderHeight();
+  });
+
   // Right-side Spotify-inspired details drawer. A row keeps its URL for no-JS,
   // middle-click and open-in-new-tab behaviour; a normal click opens the drawer.
   var drawer = document.getElementById("song-drawer");
@@ -672,6 +732,8 @@
     drawer.setAttribute("aria-hidden", "false");
     drawerBackdrop.hidden = Boolean(dockedPanel);
     document.body.classList.add("drawer-is-open");
+    updateSiteHeaderHeight();
+    window.setTimeout(updateSiteHeaderHeight, 280);
     window.setTimeout(function () { drawerClose && drawerClose.focus(); }, 0);
   }
 
@@ -682,6 +744,8 @@
     drawer.setAttribute("aria-modal", "false");
     if (drawerBackdrop) drawerBackdrop.hidden = true;
     document.body.classList.remove("drawer-is-open");
+    updateSiteHeaderHeight();
+    window.setTimeout(updateSiteHeaderHeight, 280);
     if (drawerPlayerArea) drawerPlayerArea.textContent = "";
     if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
   }
@@ -695,7 +759,10 @@
   }
   if (drawerClose) drawerClose.addEventListener("click", closeSongDrawer);
   if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSongDrawer);
-  window.addEventListener("resize", syncDrawerResponsiveMode);
+  window.addEventListener("resize", function () {
+    updateSiteHeaderHeight();
+    syncDrawerResponsiveMode();
+  });
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
       setPopoverOpen(false);
