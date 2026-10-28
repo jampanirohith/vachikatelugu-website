@@ -1838,3 +1838,25 @@ html[data-theme="light"] .chart-tab.is-active { background: var(--accent); color
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+
+/* Revision: keep the header at its normal size while the song drawer is open. */
+body.drawer-is-open .site-header,
+body.drawer-is-open .header-inner,
+body.drawer-is-open .brand,
+body.drawer-is-open .brand-wordmark,
+body.drawer-is-open .brand-badge,
+body.drawer-is-open .nav-link,
+body.drawer-is-open .header-search { padding-top: revert; padding-bottom: revert; min-height: revert; font-size: revert; }
+body.drawer-is-open .header-inner { gap: 22px; }
+body.drawer-is-open .brand-wordmark { width: clamp(112px, 9vw, 132px); }
+body.drawer-is-open .nav-link { min-height: 36px; padding: 6px 12px; font-size: .91rem; }
+.brand { gap: 9px; }
+.brand-symbol { width: 35px; height: 35px; object-fit: contain; flex: 0 0 auto; }
+.brand-wordmark { width: clamp(112px, 9vw, 132px); }
+.advanced-search-link { border-radius: 999px; padding-inline: 12px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule); background: rgba(180,160,255,.09); white-space: nowrap; }
+.home-section { content-visibility: auto; contain-intrinsic-size: auto 560px; }
+.home-movie-leaders, .home-section { transform-style: preserve-3d; }
+.home-section .track { transition: transform .22s ease, background .22s ease, border-color .22s ease; }
+.home-section .track:hover { transform: translate3d(0,-2px,8px); }
+@media (max-width: 700px) { .brand-symbol { width: 29px; height: 29px; } .brand-wordmark { width: 100px; } }

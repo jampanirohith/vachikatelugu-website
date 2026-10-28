@@ -46,3 +46,12 @@ Browser-only visual fixtures use placeholder artwork to avoid reliance on third-
 - Docked song detail drawer below the measured header on desktop, compacted the header while the drawer is open, preserved overlay mode on smaller screens, and moved provider actions toward the top of the drawer.
 - Normalized displayed and indexed duration seconds/milliseconds from valid `duration_formatted` values without rewriting the DB.
 - Added regression assertions for home search and static IMDb vote ordering. This patch's current environment did not permit a reliable headless Chromium visual run; refer to `VALIDATION_REPORT.md` for the exact checks run and remaining caveat.
+
+
+## Follow-up visual and ranking revision
+
+- Restored the header to its normal height when the song detail drawer opens; the drawer remains positioned below the header.
+- Header branding now combines the high-contrast clef/soundwave symbol with the existing Vachika wordmark.
+- Replaced the homepage's default play-count chart block with a Popular movies list ranked by numeric IMDb vote count, so the first screen stays focused on search and the next section continues the catalogue.
+- The Popular movies tab on Charts is ranked by IMDb vote count and displays the vote total and IMDb score instead of presenting song-play totals as movie popularity.
+- Renamed the header Advanced action to Filters while retaining its integrated search-form placement and destination.

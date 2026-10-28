@@ -26,7 +26,7 @@ ALLOWED_INDEX_KEYS = {
         "slug", "path", "albumPath", "imdbId", "title", "telugu", "year", "released",
         "genres", "musicDirectors", "directors", "cast", "plot", "certification",
         "originalLanguage", "runtimeMinutes", "ottProviders", "songs", "albums", "poster", "artwork",
-        "imdbScore", "imdbVotes", "imdbVotesNumeric", "playsNum", "albumReleased",
+        "playsNum", "albumReleased", "imdbScore", "imdbVotes", "imdbVotesNumeric",
     },
     "albums": {
         "slug", "path", "moviePath", "imdbId", "title", "movieTitle", "year", "release", "artist",

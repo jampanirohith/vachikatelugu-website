@@ -490,7 +490,7 @@ def layout(cfg, site_url, *, title, desc, path, body, og_type="website", og_imag
 <body>
 <header class="site-header">
   <div class="header-inner">
-    <a class="brand" href="/" aria-label="Vachika home"><img class="brand-wordmark" src="/static/vachika-wordmark.png" alt="Vachika" width="160" height="37"><span class="brand-badge" aria-hidden="true">MUSIC</span></a>
+    <a class="brand" href="/" aria-label="Vachika home"><img class="brand-symbol" src="/static/vachika-logo-dark.png" alt="" width="42" height="42"><img class="brand-wordmark" src="/static/vachika-wordmark.png" alt="Vachika" width="132" height="30"></a>
     <nav class="site-nav" aria-label="Main navigation">
       <a class="nav-link{' active' if path == '/' else ''}" href="/">Home</a>
       <a class="nav-link{' active' if path == '/songs/' else ''}" href="/songs/">Songs</a>
@@ -502,7 +502,7 @@ def layout(cfg, site_url, *, title, desc, path, body, og_type="website", og_imag
       <label class="sr" for="q">Search songs, films, albums and artists</label>
       <input id="q" name="q" type="search" placeholder="Search songs, films, albums…" autocomplete="off" enterkeyhint="search" aria-controls="search-popover" aria-expanded="false">
       <button type="submit" aria-label="Search"><span aria-hidden="true">⌕</span></button>
-      <a class="advanced-search-link" href="/advanced-search/" aria-label="Open advanced database search">Advanced</a>
+      <a class="advanced-search-link" href="/advanced-search/" aria-label="Open search filters" title="Search filters">Filters</a>
       <div id="search-popover" class="search-popover" hidden role="status" aria-label="Search suggestions"></div>
     </form>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch theme" title="Switch between dark and light theme"><span class="theme-toggle-icon" aria-hidden="true">☼</span></button>
@@ -799,6 +799,7 @@ def home_page(cfg, site_url, movies):
     top_songs = sorted(all_songs, key=lambda s: s["plays_num"], reverse=True)[:5]
     popular_albums = sorted(all_albums, key=album_total_plays, reverse=True)[:6]
     top_rows = "".join(song_row(song, rank=i + 1, show_plays=True) for i, song in enumerate(top_songs))
+    movie_vote_rows = "".join(chart_entity_row(movie, i + 1, "movie") for i, movie in enumerate(sorted(movies, key=lambda m: (-int(m.get("imdb_votes_numeric") or 0), m["title"].casefold()))[:10]))
     album_items = "".join(album_card(movie, eager=i < 3) for i, movie in enumerate(popular_albums))
 
     body = f"""
@@ -826,9 +827,10 @@ def home_page(cfg, site_url, movies):
 <p id="status" class="sr" role="status" aria-live="polite"></p>
 
 <div id="browse" class="wrap">
-  <section class="home-section">
-    <div class="section-heading"><div><p class="eyebrow">PLAY COUNT LEADERS</p><h2>Charts</h2></div><a class="text-link" href="/charts/">View all charts <span aria-hidden="true">↗</span></a></div>
-    <ol class="tracks">{top_rows}</ol>
+  <section class="home-section home-movie-leaders">
+    <div class="section-heading"><div><p class="eyebrow">MOST-RATED FILMS</p><h2>Popular movies</h2></div><a class="text-link" href="/movies/">Explore all movies <span aria-hidden="true">↗</span></a></div>
+    <p class="section-note">Ranked by IMDb vote count from the catalogue database.</p>
+    <ol class="tracks">{movie_vote_rows}</ol>
   </section>
   <section class="home-section">
     <div class="section-heading"><div><p class="eyebrow">TRACKS ADD UP</p><h2>Popular albums</h2></div><a class="text-link" href="/albums/">Explore all albums <span aria-hidden="true">↗</span></a></div>
@@ -1003,15 +1005,17 @@ def chart_entity_row(entity, rank, kind):
         count = len(movie["songs"])
         total = album_total_plays(movie)
         title = movie["title"]
-        subtitle = f'{movie["year"]} · {count} {"song" if count == 1 else "songs"} · {len(movie["albums"])} {"album" if len(movie["albums"]) == 1 else "albums"}'
+        votes = int(movie.get("imdb_votes_numeric") or 0)
+        subtitle = f'{movie["year"]} · IMDb {movie.get("imdb_rating") or "—"} · {votes:,} IMDb votes'
     cover = (f'<img class="track-artwork" src="{e(artwork)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer">' if artwork else '<span class="track-artwork track-artwork-empty" aria-hidden="true">♪</span>')
-    return f'<li class="track entity-chart-row"><a href="{e(path)}"><span class="n">{rank}</span>{cover}<span class="main"><span class="name">{e(title)}</span><span class="sub">{e(subtitle)}</span></span><span class="meta"><span class="plays">{e(format_count(total))} plays</span></span></a></li>'
+    metric = f'{votes:,} votes' if kind == "movie" else f'{e(format_count(total))} plays'
+    return f'<li class="track entity-chart-row"><a href="{e(path)}"><span class="n">{rank}</span>{cover}<span class="main"><span class="name">{e(title)}</span><span class="sub">{e(subtitle)}</span></span><span class="meta"><span class="plays">{metric}</span></span></a></li>'
 
 
 def charts_page(cfg, site_url, movies):
     songs = sorted((s for movie in movies for s in movie["songs"]), key=lambda s: s["plays_num"], reverse=True)
     albums = sorted((album for movie in movies for album in movie["albums"]), key=album_total_plays, reverse=True)
-    movies_ranked = sorted(movies, key=album_total_plays, reverse=True)
+    movies_ranked = sorted(movies, key=lambda m: (-int(m.get("imdb_votes_numeric") or 0), m["title"].casefold()))
     song_rows = "".join(song_row(song, rank=i + 1, show_plays=True) for i, song in enumerate(songs[:30]))
     album_rows = "".join(chart_entity_row(album, i + 1, "album") for i, album in enumerate(albums[:30]))
     movie_rows = "".join(chart_entity_row(movie, i + 1, "movie") for i, movie in enumerate(movies_ranked[:30]))
@@ -1019,7 +1023,7 @@ def charts_page(cfg, site_url, movies):
 <section class="page-intro wrap">
   <p class="eyebrow">DATABASE RANKINGS</p>
   <h1>Charts</h1>
-  <p class="lede">Explore the most-played songs, soundtrack albums and movies with the strongest combined song plays in the current dataset.</p>
+  <p class="lede">Explore the most-played songs, soundtrack albums and movies ranked by IMDb vote count.</p>
   <p class="intro-meta">{len(songs)} songs · {len(albums)} albums · {len(movies)} movies <span>·</span> Snapshot-based, not live</p>
 </section>
 <section class="wrap page-section charts-section">

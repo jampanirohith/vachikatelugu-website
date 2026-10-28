@@ -39,3 +39,8 @@ python3 -m py_compile build.py db_source.py validate_database.py check.py check_
 ```
 
 Then review the Git diff and run the generated site in a normal browser at desktop and mobile widths, including opening and closing the song drawer. The current patch validation ran database/build/internal-link/privacy/syntax checks, but could not complete a reliable headless Chromium screenshot pass. See `VALIDATION_REPORT.md` for coverage details.
+
+
+### Follow-up UI patch
+
+This revision also overlays `check_public_output.py` and adds `static/vachika-logo-dark.png`, used as the high-contrast symbol beside the existing wordmark. Do not delete any existing files; allow these matching files to be overwritten.
