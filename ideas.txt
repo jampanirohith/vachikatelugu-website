@@ -1,5 +1,5 @@
 animated logo on entry and making the website logo clean like it is square and not looking good change it
-
+df
 consider original movie language ratings in movie filters
 
 by the header should shrink when i open song sideveiw it should not be shrinked, reverse it it is not looking good and also see the header there is no logo correct it the current logo images has the vachika, analyse the font image and put the logo and beside it put the vachika name with the font. and also on the homepage the charts should not appear by deafult, like when i scroll below the remainging things should be shown like a 3d website and also the header advaced search button intergrate everything into the search bar. make such changes and send the final patch zip analyse everything and send the final patch zip and also in popular movies charts the number of imdb ratings should be considered
