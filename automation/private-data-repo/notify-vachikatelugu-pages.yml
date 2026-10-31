@@ -92,5 +92,5 @@ jobs:
                   "SELECT value FROM schema_metadata WHERE key='schema_version'"
               ).fetchone()
               schema_version = str(version_row[0]) if version_row else ""
-              if schema_version != "5":
+              if schema_version != "9":
                   sys.exit(
