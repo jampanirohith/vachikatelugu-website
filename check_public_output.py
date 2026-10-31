@@ -18,7 +18,7 @@ ALLOWED_INDEX_KEYS = {
         "id", "title", "movieTitle", "movieSlug", "moviePath", "albumPath", "albumTitle",
         "year", "released", "artists", "lyricists", "musicDirectors", "plays", "playsNum",
         "duration", "durationSec", "number", "discNumber", "songCount", "artwork", "poster",
-        "genres", "movieGenres", "songFlavor", "imdbId", "release", "spotifyId", "ytmId",
+        "genres", "movieGenres", "imdbId", "release", "spotifyId", "ytmId",
         "spotifyUrl", "ytmUrl", "youtubeVideoUrl", "youtubeVideoId", "youtubeVideoTitle",
         "youtubeVideoViews",
     },

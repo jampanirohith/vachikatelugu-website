@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Read the normalized VachikaTelugu SQLite catalogue, read-only.
 
-The website is built from relational tables and explicit scalar columns. No
-source JSON blob or JSON-valued database column is used as catalogue content.
-Raw snapshots, serialized arrays, provenance and source-status payloads are not
-read by this module.
+This adapter targets the current movie-pipeline schema v9. It deliberately
+builds public catalogue data from normalized SQL columns and relationship
+Tables; raw JSON/source payload blobs are not used to construct website pages.
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = ROOT / ".build-data" / "vachikatelugu.db"
 LOCAL_DB = ROOT / "vachikatelugu.db"
-SUPPORTED_SCHEMA_VERSION = "5"
+SUPPORTED_SCHEMA_VERSION = "9"
 
 REQUIRED_TABLES = {
     "schema_metadata", "movies", "albums", "songs", "artists", "lyricists",
@@ -28,9 +27,51 @@ REQUIRED_TABLES = {
     "source_album_matches",
 }
 
+# Required columns are the normalized v9 contract used by the website.
+# Deliberately do not list songs.song_flavor: it was retired from schema v9.
+REQUIRED_COLUMNS = {
+    "schema_metadata": {"key", "value"},
+    "movies": {
+        "imdb_id", "title", "title_telugu", "release_year", "original_language",
+        "cinematic_universe", "imdb_score", "imdb_votes", "imdb_votes_numeric",
+        "tmdb_url", "imdb_url", "wikipedia_url", "wikipedia_soundtrack_url",
+        "plot_summary", "genres_json", "certification", "runtime_minutes",
+        "poster_url", "backdrop_url", "title_logo_url", "trailer_youtube_id",
+        "total_songs", "processing_status",
+    },
+    "albums": {
+        "album_id", "movie_id", "title", "release_date", "label", "upc_barcode",
+        "spotify_popularity", "artwork_hd_640", "artwork_300", "copyright_c", "copyright_p",
+        "spotify_album_id", "youtube_album_id", "spotify_album_title", "youtube_album_title",
+        "spotify_total_tracks", "spotify_saved_to_library", "spotify_url", "youtube_music_url",
+        "total_tracks",
+    },
+    "songs": {
+        "song_id", "album_id", "movie_id", "track_number", "title", "lyricist",
+        "lrc_lyrics", "plain_lyrics", "lrclib_id", "lyrics_status", "lyrics_type",
+        "data_source", "is_bonus_track", "duration_formatted", "duration_ms", "duration_sec",
+        "youtube_video_song_views", "spotify_uri", "track_number_original", "disc_number",
+        "is_explicit", "isrc_code",
+    },
+    "artists": {"artist_id", "artist_name", "normalized_name", "spotify_artist_id"},
+    "lyricists": {"lyricist_id", "lyricist_name", "normalized_name"},
+    "song_artists": {"song_id", "artist_id", "credit_order", "credit_role"},
+    "song_lyricists": {"song_id", "lyricist_id", "credit_order"},
+    "song_media": {
+        "song_id", "platform", "external_id", "url", "preview_url", "views_text",
+        "popularity", "video_title", "extra_json",
+    },
+    "movie_people": {"movie_id", "role", "person_name", "credit_order"},
+    "movie_genres": {"movie_id", "genre", "genre_order"},
+    "song_genres": {"song_id", "genre", "genre_order"},
+    "movie_links": {"movie_id", "link_type", "url"},
+    "ott_availability": {"movie_id", "provider", "availability_type"},
+    "source_album_matches": {"movie_id", "platform", "album_id", "album_title", "url", "source_csv"},
+}
+
 
 def database_path() -> Path | None:
-    """Return the configured/local database path, without copying or modifying it."""
+    """Return the configured/local database path without copying or modifying it."""
     configured = os.environ.get("DATABASE_PATH")
     if configured:
         path = Path(configured).expanduser()
@@ -47,7 +88,7 @@ def database_path() -> Path | None:
 
 
 def _read_only_connection(path: Path) -> sqlite3.Connection:
-    # mode=ro prevents website build scripts from changing the source database.
+    """Open a SQLite database read-only so site builds cannot mutate source data."""
     return sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
 
 
@@ -55,7 +96,10 @@ def _nonempty(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
-    if not text or text.casefold() in {"n/a", "na", "not available", "not provided", "not specified", "unknown", "null", "none", "undefined"}:
+    if not text or text.casefold() in {
+        "n/a", "na", "not available", "not provided", "not specified",
+        "unknown", "null", "none", "undefined",
+    }:
         return None
     return text
 
@@ -67,7 +111,7 @@ def _valid_external_id(value: Any) -> str | None:
 
 
 def _valid_http_url(value: Any) -> str | None:
-    """Accept only ordinary HTTP(S) URLs safe to place in links/image sources."""
+    """Accept ordinary HTTP(S) URLs safe to place in links and image sources."""
     text = _nonempty(value)
     if not text or any(ch in text for ch in "\r\n\t\\\"'"):
         return None
@@ -75,24 +119,27 @@ def _valid_http_url(value: Any) -> str | None:
         parsed = urlsplit(text)
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             return None
-        # Do not allow embedded credentials in URLs that may be rendered publicly.
         if parsed.username is not None or parsed.password is not None:
             return None
-        # Accessing .port catches malformed authority/port strings.
         _ = parsed.port
     except ValueError:
         return None
     return text
 
 
-def load_database_catalogue() -> dict[str, Any]:
-    """Load a normalized, relational catalogue from the SQLite database.
+def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {
+        str(row[1]).lower()
+        for row in connection.execute(f'PRAGMA table_info("{table}")')
+    }
 
-    Returns movies, albums and songs with relationship values attached. All
-    source content comes from ordinary columns and normalized junction tables.
-    No JSON-valued column, raw snapshot, provenance blob or status payload is
-    used to construct public pages. The generated search-index.json is a
-    separately reviewed derivative of this normalized catalogue.
+
+def load_database_catalogue() -> dict[str, Any]:
+    """Load movies, albums and songs from normalized schema-v9 relations.
+
+    Public page data is constructed from scalar columns and junction tables.
+    Raw JSON snapshots, source metadata blobs, and status payloads are never
+    decoded as a fallback for missing normalized values.
     """
     db = database_path()
     if db is None:
@@ -100,6 +147,7 @@ def load_database_catalogue() -> dict[str, Any]:
             "No SQLite database found. Run fetch_database.py or set DATABASE_PATH; "
             "the website requires the private SQLite catalogue and has no JSON fallback."
         )
+
     connection = _read_only_connection(db)
     try:
         connection.row_factory = sqlite3.Row
@@ -108,12 +156,25 @@ def load_database_catalogue() -> dict[str, Any]:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        missing = sorted(REQUIRED_TABLES - tables)
-        if missing:
-            raise RuntimeError("SQLite database is missing required table(s): " + ", ".join(missing))
+        missing_tables = sorted(REQUIRED_TABLES - tables)
+        if missing_tables:
+            raise RuntimeError(
+                "SQLite database is missing required table(s): " + ", ".join(missing_tables)
+            )
+
+        missing_columns = []
+        for table, expected in REQUIRED_COLUMNS.items():
+            absent = sorted(expected - _table_columns(connection, table))
+            if absent:
+                missing_columns.append(f"{table}: {', '.join(absent)}")
+        if missing_columns:
+            raise RuntimeError(
+                "SQLite database does not satisfy the schema-v9 website contract: "
+                + " | ".join(missing_columns)
+            )
 
         schema_row = connection.execute(
-            "SELECT value FROM schema_metadata WHERE key = 'schema_version'"
+            "SELECT value FROM schema_metadata WHERE key='schema_version'"
         ).fetchone()
         schema_version = str(schema_row[0]) if schema_row else ""
         if schema_version != SUPPORTED_SCHEMA_VERSION:
@@ -122,7 +183,6 @@ def load_database_catalogue() -> dict[str, Any]:
                 f"this website adapter supports version {SUPPORTED_SCHEMA_VERSION}."
             )
 
-        # Movies: no raw_json, source_metadata_json or source_status_json selected.
         movie_rows = connection.execute("""
             SELECT imdb_id, title, title_telugu, release_year, original_language,
                    cinematic_universe, imdb_score, imdb_votes, imdb_votes_numeric,
@@ -131,7 +191,7 @@ def load_database_catalogue() -> dict[str, Any]:
                    backdrop_url, title_logo_url, trailer_youtube_id, total_songs,
                    processing_status
             FROM movies
-            WHERE processing_status = 'processed'
+            WHERE processing_status='processed'
             ORDER BY release_year, title, imdb_id
         """).fetchall()
         if not movie_rows:
@@ -147,23 +207,17 @@ def load_database_catalogue() -> dict[str, Any]:
                 raise RuntimeError("A processed movie row has an empty imdb_id or title")
             item["imdb_id"] = movie_id
             item["title"] = movie_title
-            for image_field in ("poster_url", "backdrop_url", "title_logo_url"):
-                item[image_field] = _valid_http_url(item.get(image_field))
-            item["tmdb_url"] = _valid_http_url(item.get("tmdb_url"))
-            item["imdb_url"] = _valid_http_url(item.get("imdb_url"))
-            item["wikipedia_url"] = _valid_http_url(item.get("wikipedia_url"))
-            item["wikipedia_soundtrack_url"] = _valid_http_url(item.get("wikipedia_soundtrack_url"))
+            for field in ("poster_url", "backdrop_url", "title_logo_url", "tmdb_url",
+                          "imdb_url", "wikipedia_url", "wikipedia_soundtrack_url"):
+                item[field] = _valid_http_url(item.get(field))
             item["trailer_youtube_id"] = _valid_external_id(item.get("trailer_youtube_id"))
             item["genres"] = []
-            # Preserve every normalized movie_people role, not only the roles
-            # currently represented in the design. The renderer curates known
-            # roles and can show additional public credit roles separately.
             item["people"] = {}
             item["links"] = {}
             item["ott_availability"] = []
             item["albums"] = []
             item["songs"] = []
-            movie_by_id[item["imdb_id"]] = item
+            movie_by_id[movie_id] = item
             movies.append(item)
 
         for row in connection.execute("""
@@ -190,9 +244,9 @@ def load_database_catalogue() -> dict[str, Any]:
             movie_id, link_type, url = row
             if movie_id not in movie_by_id:
                 continue
-            value = _valid_http_url(url)
-            if value:
-                movie_by_id[movie_id]["links"][str(link_type).strip().lower()] = value
+            valid_url = _valid_http_url(url)
+            if valid_url:
+                movie_by_id[movie_id]["links"][str(link_type).strip().lower()] = valid_url
 
         for row in connection.execute("""
             SELECT movie_id, provider, availability_type FROM ott_availability
@@ -204,32 +258,31 @@ def load_database_catalogue() -> dict[str, Any]:
                     "provider": str(provider).strip(), "type": str(kind).strip().lower()
                 })
 
-        # Album rows are first-class entities. One movie may own multiple albums.
         album_rows = connection.execute("""
             SELECT album_id, movie_id, title, release_date, label, upc_barcode,
                    spotify_popularity, artwork_hd_640, artwork_300, copyright_c,
                    copyright_p, spotify_album_id, youtube_album_id,
                    spotify_album_title, youtube_album_title, spotify_total_tracks,
-                   spotify_saved_to_library, spotify_url,
-                   youtube_music_url, total_tracks
+                   spotify_saved_to_library, spotify_url, youtube_music_url, total_tracks
             FROM albums
             ORDER BY movie_id, title COLLATE NOCASE, album_id
         """).fetchall()
+
         albums: list[dict[str, Any]] = []
         album_by_id: dict[str, dict[str, Any]] = {}
+        album_counts: dict[str, int] = {}
         for row in album_rows:
             source = dict(row)
             movie = movie_by_id.get(source["movie_id"])
             if movie is None:
-                continue  # Album belongs to a movie excluded from the public processed catalogue.
-            if not _nonempty(source.get("album_id")):
-                raise RuntimeError(f"Album for movie {source['movie_id']} has no album_id")
-            # Only the dedicated scalar artwork columns are used. If these are
-            # absent, the site may show the movie poster with a clear fallback
-            # alt text; it does not mine serialized provider JSON for artwork.
+                continue
+            album_id = _valid_external_id(source.get("album_id"))
+            if not album_id:
+                raise RuntimeError(f"Album for movie {source['movie_id']} has no valid album_id")
             item = {
-                "album_id": _nonempty(source.get("album_id")),
-                "movie_id": source["movie_id"], "title": _nonempty(source.get("title")),
+                "album_id": album_id,
+                "movie_id": source["movie_id"],
+                "title": _nonempty(source.get("title")),
                 "release_date": _nonempty(source.get("release_date")),
                 "label": _nonempty(source.get("label")),
                 "upc_barcode": _nonempty(source.get("upc_barcode")),
@@ -238,8 +291,8 @@ def load_database_catalogue() -> dict[str, Any]:
                 "artwork_300": _valid_http_url(source.get("artwork_300")),
                 "copyright_c": _nonempty(source.get("copyright_c")),
                 "copyright_p": _nonempty(source.get("copyright_p")),
-                "spotify_album_id": _nonempty(source.get("spotify_album_id")),
-                "youtube_album_id": _nonempty(source.get("youtube_album_id")),
+                "spotify_album_id": _valid_external_id(source.get("spotify_album_id")),
+                "youtube_album_id": _valid_external_id(source.get("youtube_album_id")),
                 "spotify_album_title": _nonempty(source.get("spotify_album_title")),
                 "youtube_album_title": _nonempty(source.get("youtube_album_title")),
                 "spotify_total_tracks": source.get("spotify_total_tracks"),
@@ -250,167 +303,188 @@ def load_database_catalogue() -> dict[str, Any]:
                 "songs": [],
             }
             item["spotify_url"] = item["spotify_url"] or (
-                f"https://open.spotify.com/album/{item['spotify_album_id']}" if item["spotify_album_id"] else None
+                f"https://open.spotify.com/album/{item['spotify_album_id']}"
+                if item["spotify_album_id"] else None
             )
             item["youtube_music_url"] = item["youtube_music_url"] or (
-                f"https://music.youtube.com/browse/{item['youtube_album_id']}" if item["youtube_album_id"] else None
+                f"https://music.youtube.com/browse/{item['youtube_album_id']}"
+                if item["youtube_album_id"] else None
             )
-            album_by_id[item["album_id"]] = item
+            album_by_id[album_id] = item
             movie["albums"].append(item)
             albums.append(item)
+            album_counts[source["movie_id"]] = album_counts.get(source["movie_id"], 0) + 1
 
-        # Relationship tables are the authoritative song-credit source.
+        # The current producer guarantees exactly one album anchor per movie.
+        no_album_movies = [movie_id for movie_id in movie_by_id if album_counts.get(movie_id, 0) != 1]
+        if no_album_movies:
+            raise RuntimeError(
+                "Schema-v9 catalogue must contain exactly one album row per processed movie; "
+                f"found a mismatch for {len(no_album_movies)} movie(s), first: {no_album_movies[0]}"
+            )
+
         artists_by_song: dict[str, list[dict[str, Any]]] = {}
-        artist_rows = connection.execute("""
+        for row in connection.execute("""
             SELECT sa.song_id, sa.credit_order, sa.credit_role, a.artist_id, a.artist_name
-            FROM song_artists sa JOIN artists a ON a.artist_id = sa.artist_id
+            FROM song_artists sa JOIN artists a ON a.artist_id=sa.artist_id
             ORDER BY sa.song_id, sa.credit_order, a.artist_name COLLATE NOCASE
-        """).fetchall()
-        for row in artist_rows:
-            artist_name = _nonempty(row["artist_name"])
-            if artist_name:
+        """):
+            name = _nonempty(row["artist_name"])
+            if name:
                 artists_by_song.setdefault(row["song_id"], []).append({
-                    "artist_id": row["artist_id"], "name": artist_name,
-                    "role": _nonempty(row["credit_role"]) or "artist", "order": row["credit_order"],
+                    "artist_id": row["artist_id"], "name": name,
+                    "role": _nonempty(row["credit_role"]) or "artist",
+                    "order": row["credit_order"],
                 })
 
         lyricists_by_song: dict[str, list[dict[str, Any]]] = {}
-        lyricist_rows = connection.execute("""
+        for row in connection.execute("""
             SELECT sl.song_id, sl.credit_order, l.lyricist_id, l.lyricist_name
-            FROM song_lyricists sl JOIN lyricists l ON l.lyricist_id = sl.lyricist_id
+            FROM song_lyricists sl JOIN lyricists l ON l.lyricist_id=sl.lyricist_id
             ORDER BY sl.song_id, sl.credit_order, l.lyricist_name COLLATE NOCASE
-        """).fetchall()
-        for row in lyricist_rows:
-            lyricist_name = _nonempty(row["lyricist_name"])
-            if lyricist_name:
+        """):
+            name = _nonempty(row["lyricist_name"])
+            if name:
                 lyricists_by_song.setdefault(row["song_id"], []).append({
-                    "lyricist_id": row["lyricist_id"], "name": lyricist_name,
+                    "lyricist_id": row["lyricist_id"], "name": name,
                     "order": row["credit_order"],
                 })
 
         media_by_song: dict[str, dict[str, dict[str, Any]]] = {}
-        media_rows = connection.execute("""
+        for row in connection.execute("""
             SELECT song_id, platform, external_id, url, preview_url, views_text,
                    popularity, video_title
             FROM song_media ORDER BY song_id, platform
-        """).fetchall()
-        for row in media_rows:
+        """):
             song_id = row["song_id"]
             platform = str(row["platform"] or "").strip().lower().replace("-", "_").replace(" ", "_")
             if not platform:
                 continue
-            media = {
-                "platform": platform, "external_id": _valid_external_id(row["external_id"]),
-                "url": _valid_http_url(row["url"]), "preview_url": _valid_http_url(row["preview_url"]),
-                "views_text": _nonempty(row["views_text"]), "popularity": row["popularity"],
+            media_by_song.setdefault(song_id, {})[platform] = {
+                "platform": platform,
+                "external_id": _valid_external_id(row["external_id"]),
+                "url": _valid_http_url(row["url"]),
+                "preview_url": _valid_http_url(row["preview_url"]),
+                "views_text": _nonempty(row["views_text"]),
+                "popularity": row["popularity"],
                 "video_title": _nonempty(row["video_title"]),
             }
-            media_by_song.setdefault(song_id, {})[platform] = media
 
-        song_genres: dict[str, list[str]] = {}
+        genres_by_song: dict[str, list[str]] = {}
         for row in connection.execute("""
             SELECT song_id, genre FROM song_genres
             ORDER BY song_id, genre_order, genre COLLATE NOCASE
         """):
-            if _nonempty(row[1]):
-                song_genres.setdefault(row[0], []).append(str(row[1]).strip())
+            genre = _nonempty(row["genre"])
+            if genre:
+                genres_by_song.setdefault(row["song_id"], []).append(genre)
 
+        # song_flavor is intentionally absent from this SELECT. It was removed
+        # from schema v9 and must not be reintroduced into website page data.
         song_rows = connection.execute("""
             SELECT s.song_id, s.album_id, s.movie_id, s.track_number, s.title, s.lyricist,
-                   s.song_flavor, s.lrc_lyrics, s.plain_lyrics, s.lrclib_id, s.lyrics_status,
+                   s.lrc_lyrics, s.plain_lyrics, s.lrclib_id, s.lyrics_status,
                    s.lyrics_type, s.data_source, s.is_bonus_track, s.duration_formatted,
-                   s.duration_ms, s.duration_sec, s.spotify_uri, s.track_number_original,
-                   s.disc_number, s.is_explicit, s.isrc_code
+                   s.duration_ms, s.duration_sec, s.youtube_video_song_views,
+                   s.spotify_uri, s.track_number_original, s.disc_number,
+                   s.is_explicit, s.isrc_code
             FROM songs s JOIN movies m ON m.imdb_id=s.movie_id
             WHERE m.processing_status='processed'
             ORDER BY s.movie_id, s.album_id, COALESCE(s.disc_number, 1),
                      COALESCE(s.track_number, 2147483647), s.title COLLATE NOCASE, s.song_id
         """).fetchall()
+
         songs: list[dict[str, Any]] = []
         for row in song_rows:
-            song = dict(row)
-            movie = movie_by_id.get(song["movie_id"])
-            album = album_by_id.get(song["album_id"])
-            # Never silently drop a processed song: bad relational links must fail
-            # loudly before a partial catalogue can be published.
+            source = dict(row)
+            movie = movie_by_id.get(source["movie_id"])
+            album = album_by_id.get(source["album_id"])
             if movie is None or album is None:
-                raise RuntimeError(f"Song {song.get('song_id')!r} has no processed movie or album")
-            if album.get("movie_id") != song.get("movie_id"):
-                raise RuntimeError(f"Song {song.get('song_id')!r} and its album belong to different movies")
-            if not _valid_external_id(song.get("song_id")):
-                raise RuntimeError("A processed song has an empty or URL-unsafe song_id")
-            if not _nonempty(song.get("title")):
-                raise RuntimeError(f"Song {song.get('song_id')!r} has no title")
+                raise RuntimeError(f"Song {source.get('song_id')!r} has no processed movie or album")
+            if album.get("movie_id") != source.get("movie_id"):
+                raise RuntimeError(
+                    f"Song {source.get('song_id')!r} and its album belong to different movies"
+                )
+            song_id = _valid_external_id(source.get("song_id"))
+            title = _nonempty(source.get("title"))
+            if not song_id or not title:
+                raise RuntimeError("A processed song has an empty/unsafe song_id or empty title")
+
             item = {
-                "song_id": _nonempty(song.get("song_id")),
-                "album_id": song["album_id"], "movie_id": song["movie_id"],
-                "track_number": song.get("track_number"), "title": _nonempty(song.get("title")),
-                "lyricist_legacy": _nonempty(song.get("lyricist")),
-                "song_flavor": _nonempty(song.get("song_flavor")),
-                "lrc_lyrics": _nonempty(song.get("lrc_lyrics")),
-                "plain_lyrics": _nonempty(song.get("plain_lyrics")),
-                "lrclib_id": _nonempty(song.get("lrclib_id")),
-                "lyrics_status": _nonempty(song.get("lyrics_status")),
-                "lyrics_type": _nonempty(song.get("lyrics_type")),
-                "data_source": _nonempty(song.get("data_source")),
-                "is_bonus_track": song.get("is_bonus_track"),
-                "duration_formatted": _nonempty(song.get("duration_formatted")),
-                "duration_ms": song.get("duration_ms"), "duration_sec": song.get("duration_sec"),
-                "spotify_uri": _nonempty(song.get("spotify_uri")),
-                "track_number_original": song.get("track_number_original"),
-                "disc_number": song.get("disc_number"), "is_explicit": song.get("is_explicit"),
-                "isrc_code": _nonempty(song.get("isrc_code")),
-                "genres": song_genres.get(song["song_id"], []),
-                "artist_credits": artists_by_song.get(song["song_id"], []),
-                "lyricist_credits": lyricists_by_song.get(song["song_id"], []),
-                "media": media_by_song.get(song["song_id"], {}),
-                "movie": movie, "album": album,
+                "song_id": song_id,
+                "album_id": source["album_id"],
+                "movie_id": source["movie_id"],
+                "track_number": source.get("track_number"),
+                "title": title,
+                "lyricist_legacy": _nonempty(source.get("lyricist")),
+                "lrc_lyrics": _nonempty(source.get("lrc_lyrics")),
+                "plain_lyrics": _nonempty(source.get("plain_lyrics")),
+                "lrclib_id": _nonempty(source.get("lrclib_id")),
+                "lyrics_status": _nonempty(source.get("lyrics_status")),
+                "lyrics_type": _nonempty(source.get("lyrics_type")),
+                "data_source": _nonempty(source.get("data_source")),
+                "is_bonus_track": source.get("is_bonus_track"),
+                "duration_formatted": _nonempty(source.get("duration_formatted")),
+                "duration_ms": source.get("duration_ms"),
+                "duration_sec": source.get("duration_sec"),
+                "youtube_video_song_views": _nonempty(source.get("youtube_video_song_views")),
+                "spotify_uri": _nonempty(source.get("spotify_uri")),
+                "track_number_original": source.get("track_number_original"),
+                "disc_number": source.get("disc_number"),
+                "is_explicit": source.get("is_explicit"),
+                "isrc_code": _nonempty(source.get("isrc_code")),
+                "genres": genres_by_song.get(song_id, []),
+                "artist_credits": artists_by_song.get(song_id, []),
+                "lyricist_credits": lyricists_by_song.get(song_id, []),
+                "media": media_by_song.get(song_id, {}),
+                "movie": movie,
+                "album": album,
             }
-            # Preserve a usable legacy lyricist column if the normalized junction
-            # has not yet been populated for that song. It remains DB-column data.
+            # Retain compatibility with older rows whose lyricist relation has
+            # not yet been backfilled; do not parse raw JSON to recover credits.
             if not item["lyricist_credits"] and item["lyricist_legacy"]:
                 item["lyricist_credits"] = [
-                    {"lyricist_id": None, "name": part.strip(), "order": position}
-                    for position, part in enumerate(item["lyricist_legacy"].split(","))
+                    {"lyricist_id": None, "name": part.strip(), "order": index}
+                    for index, part in enumerate(item["lyricist_legacy"].split(","))
                     if part.strip()
                 ]
             album["songs"].append(item)
             movie["songs"].append(item)
             songs.append(item)
 
-        # Stable, predictable ordering, with every DB song retained regardless of media.
         for movie in movies:
-            movie["songs"].sort(key=lambda s: (
-                s.get("disc_number") or 1,
-                s.get("track_number") if s.get("track_number") is not None else 2147483647,
-                s["title"].casefold(), s["song_id"]
+            movie["songs"].sort(key=lambda song: (
+                song.get("disc_number") or 1,
+                song.get("track_number") if song.get("track_number") is not None else 2147483647,
+                song["title"].casefold(), song["song_id"],
             ))
-            movie["albums"].sort(key=lambda a: (
-                -len(a["songs"]), (a.get("title") or "").casefold(), a["album_id"]
+            movie["albums"].sort(key=lambda album: (
+                -len(album["songs"]), (album.get("title") or "").casefold(), album["album_id"],
             ))
         for album in albums:
-            album["songs"].sort(key=lambda s: (
-                s.get("disc_number") or 1,
-                s.get("track_number") if s.get("track_number") is not None else 2147483647,
-                s["title"].casefold(), s["song_id"]
+            album["songs"].sort(key=lambda song: (
+                song.get("disc_number") or 1,
+                song.get("track_number") if song.get("track_number") is not None else 2147483647,
+                song["title"].casefold(), song["song_id"],
             ))
 
-        # Report content counts only; never log row payloads or private metadata.
         print(
             f"data source: normalized SQLite ({db.name}); schema {schema_version}; "
             f"loaded {len(movies)} movies, {len(albums)} albums, {len(songs)} songs"
         )
         return {
-            "schema_version": schema_version, "database_name": db.name,
-            "movies": movies, "albums": albums, "songs": songs,
+            "schema_version": schema_version,
+            "database_name": db.name,
+            "movies": movies,
+            "albums": albums,
+            "songs": songs,
         }
     finally:
         connection.close()
 
 
-# Backward-compatible function name for scripts within older deployments; this
-# returns a normalized catalogue object, not decoded raw JSON records.
 def load_records(_ignored_legacy_json_path: str | Path | None = None) -> dict[str, Any]:
+    """Backward-compatible alias; returns normalized catalogue, not raw JSON records."""
     return load_database_catalogue()
 
 
@@ -421,7 +495,6 @@ if __name__ == "__main__":
         print(f"DATABASE READ FAILED: {exc}", file=sys.stderr)
         raise SystemExit(1)
     print(
-        f"Loaded schema {catalogue['schema_version']}: "
-        f"{len(catalogue['movies'])} movies, {len(catalogue['albums'])} albums, "
-        f"{len(catalogue['songs'])} songs."
+        f"Loaded schema {catalogue['schema_version']}: {len(catalogue['movies'])} movies, "
+        f"{len(catalogue['albums'])} albums, {len(catalogue['songs'])} songs."
     )
