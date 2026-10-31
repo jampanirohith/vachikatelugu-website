@@ -259,7 +259,7 @@ def load_movies():
         movie_by_id[movie["imdb_id"]] = movie
         movies.append(movie)
 
-    # Build each actual album as its own entity and route; do not assume one album per film.
+    # Schema v9 maintains exactly one canonical soundtrack album anchor per movie.
     for row in catalogue["albums"]:
         movie = movie_by_id.get(row.get("movie_id"))
         if not movie:
@@ -368,7 +368,8 @@ def load_movies():
                 lyricist_names.append(name)
 
         ytm_views = text_or_none(ytm.get("views_text"))
-        youtube_views = text_or_none(youtube.get("views_text"))
+        youtube_views = (text_or_none(raw.get("youtube_video_song_views"))
+                         or text_or_none(youtube.get("views_text")))
         explicit_value = raw.get("is_explicit")
         bonus_value = raw.get("is_bonus_track")
         all_media_ids = []
@@ -385,7 +386,6 @@ def load_movies():
             "disc_number": raw.get("disc_number"), "artists": artist_names,
             "artist_credits": artist_credits, "lyricists": lyricist_names,
             "genres": list(raw.get("genres") or []),
-            "song_flavor": (lambda flavor: None if flavor and flavor.casefold() in {"film soundtrack", "soundtrack"} else flavor)(text_or_none(raw.get("song_flavor"))),
             "duration": duration, "duration_sec": sec, "duration_ms": ms,
             "explicit": tri_bool(explicit_value),
             "bonus_track": tri_bool(bonus_value),
@@ -1171,7 +1171,6 @@ def song_page(cfg, site_url, song):
         ("Track number", e(song["number"] if song.get("number") is not None else "")),
         ("Disc", e(song["disc_number"] if song.get("disc_number") not in (None, 1) else "")),
         ("Genre" if len(song["genres"]) == 1 else "Genres", e(", ".join(song["genres"]))),
-        ("Song style", e(song.get("song_flavor") or "")),
         ("Bonus track", "Yes" if song["bonus_track"] is True else ""),
     ]
     metadata_markup = facts(metadata)
@@ -1415,7 +1414,7 @@ def build_search_index(movies):
             "discNumber": song["disc_number"], "songCount": len(song["album"]["songs"]),
             "artwork": album_art(song["album"], song["movie"]), "poster": song["movie"]["poster"],
             "genres": song["genres"], "movieGenres": song["movie"]["genres"],
-            "songFlavor": song["song_flavor"], "imdbId": song["movie"]["imdb_id"],
+            "imdbId": song["movie"]["imdb_id"],
             "release": song["movie"]["released"] or (song["movie"]["year"] + "-01-01"),
             "spotifyId": song["spotify_id"], "ytmId": song["ytm_id"],
             "spotifyUrl": song["spotify_url"], "ytmUrl": song["ytm_url"],
