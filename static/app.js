@@ -1,850 +1,1021 @@
+/* Vāchika front end. No dependencies; everything degrades to plain HTML without it. */
 (function () {
   "use strict";
-  document.documentElement.classList.add("js");
 
-  var input = document.getElementById("q");
-  var homeInput = document.getElementById("home-q");
-  var homeSearchForm = document.getElementById("home-search-form");
-  var searchForm = document.getElementById("global-search-form");
-  var popover = document.getElementById("search-popover");
-  var browse = document.getElementById("browse");
-  var results = document.getElementById("results");
-  var songSection = document.getElementById("song-results");
-  var albumSection = document.getElementById("album-results");
-  var filmSection = document.getElementById("film-results");
-  var songList = document.getElementById("song-list");
-  var albumList = document.getElementById("album-list");
-  var filmList = document.getElementById("film-list");
-  var empty = document.getElementById("empty");
-  var status = document.getElementById("status");
-  var index = null;
-  var indexPromise = null;
+  var INDEX_URL = "/search-index.json?v=__SEARCH_INDEX_VERSION__";
+  var DRAWER_QUERY = "(min-width: 1100px) and (hover: hover)";
+  var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /* ------------------------------------------------------------ helpers */
+  function $(selector, root) { return (root || document).querySelector(selector); }
+  function $$(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
   function norm(value) {
-    return String(value || "")
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\p{M}]+/gu, "")
-      .replace(/h/g, "")
-      .replace(/w/g, "v")
-      .replace(/([aeiou])\1+/g, "$1");
+    return String(value == null ? "" : value).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  }
+  function safeUrl(url) { return /^https?:\/\//i.test(url || "") ? url : ""; }
+  function store(key, value) {
+    try {
+      if (value === undefined) return localStorage.getItem(key);
+      localStorage.setItem(key, value);
+    } catch (error) {}
+    return null;
+  }
+  function debounce(fn, wait) {
+    var timer;
+    return function () {
+      var args = arguments, self = this;
+      clearTimeout(timer);
+      timer = setTimeout(function () { fn.apply(self, args); }, wait);
+    };
+  }
+  function toInt(value) {
+    var n = parseInt(value, 10);
+    return isNaN(n) ? null : n;
+  }
+  function icon(name) {
+    var paths = {
+      arrow: '<path d="M7 17 17 7M8.5 7H17v8.5"/>',
+      note: '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+      play: '<path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/>',
+      link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/>',
+      chevron: '<path d="m6 9 6 6 6-6"/>'
+    };
+    return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + paths[name] + "</svg>";
+  }
+  function providerIcon(kind) {
+    if (kind === "spotify") {
+      return '<svg class="provider-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M5.3 9.2c4.3-1.2 9.4-.7 13.2 1.5M6.2 12.4c3.6-1 7.7-.5 10.8 1.3M7.1 15.3c2.8-.7 5.9-.3 8.2 1" fill="none" stroke="#0a0a0a" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    }
+    if (kind === "youtube") {
+      return '<svg class="provider-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="4.5" width="22" height="15" rx="4.5" fill="currentColor"/><path d="M10 9v6l5.2-3z" fill="#fff"/></svg>';
+    }
+    return '<svg class="provider-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="11" fill="currentColor"/><circle cx="12" cy="12" r="6.2" fill="none" stroke="#fff" stroke-width="1.4"/><path d="M10.2 9v6l5-3z" fill="#fff"/></svg>';
+  }
+  function formatCount(value) {
+    value = Math.max(0, Number(value) || 0);
+    if (value >= 1e9) return (value / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+    if (value >= 1e6) return (value / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (value >= 1e3) return (value / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(Math.round(value));
+  }
+  function personLinks(names) {
+    return (names || []).map(function (name) {
+      return '<a href="/advanced-search/?q=' + encodeURIComponent(name) + '">' + esc(name) + "</a>";
+    }).join(", ");
   }
 
+  /* ---------------------------------------------------------- search index */
+  var indexPromise = null;
   function loadIndex() {
-    if (index) return Promise.resolve(index);
-    if (indexPromise) return indexPromise;
-    indexPromise = fetch("/search-index.json?v=__SEARCH_INDEX_VERSION__", { credentials: "same-origin" })
-      .then(function (response) {
-        if (!response.ok) throw new Error("Search data returned " + response.status);
-        return response.json();
-      })
-      .then(function (data) {
-        if (!data || !Array.isArray(data.songs) || !Array.isArray(data.movies)) {
-          throw new Error("Search data format is invalid");
-        }
-        index = data;
-        return index;
-      })
-      .catch(function (error) {
-        indexPromise = null;
-        console.error("Unable to load Vachika search data", error);
-        throw error;
-      });
+    if (!indexPromise) {
+      indexPromise = fetch(INDEX_URL, { credentials: "same-origin" })
+        .then(function (response) {
+          if (!response.ok) throw new Error("search index " + response.status);
+          return response.json();
+        })
+        .then(prepareIndex)
+        .catch(function (error) { indexPromise = null; throw error; });
+    }
     return indexPromise;
   }
 
-  function fieldsForSong(song) {
-    return [song.title, song.albumTitle, song.movieTitle, song.year, (song.artists || []).join(" "),
-      (song.lyricists || []).join(" "), (song.musicDirectors || []).join(" "),
-      (song.genres || []).join(" "), (song.movieGenres || []).join(" "), song.songFlavor, song.imdbId, song.number];
-  }
-
-  function fieldsForMovie(movie) {
-    return [movie.title, movie.telugu, movie.imdbId, movie.year, (movie.genres || []).join(" "),
-      (movie.musicDirectors || []).join(" "), (movie.directors || []).join(" "),
-      (movie.cast || []).join(" "), movie.plot, movie.certification];
-  }
-
-  function rankItems(items, raw, getFields, limit) {
-    var query = norm(raw);
-    if (!query) return [];
-    var tokens = String(raw).trim().split(/\s+/).map(norm).filter(function (token) { return token.length > 1; });
-    var hits = [];
-    items.forEach(function (item) {
-      var fields = getFields(item).map(norm).filter(Boolean);
-      var key = fields.join(" ");
-      var score = -1;
-      if (fields[0] === query || fields[0].indexOf(query) === 0) score = 0;
-      else if (fields.some(function (field) { return field.indexOf(query) >= 0; })) score = 1;
-      else if (key.indexOf(query) >= 0) score = 2;
-      else if (tokens.length > 1 && tokens.every(function (token) { return fields.some(function (field) { return field.indexOf(token) >= 0; }); })) score = 3;
-      if (score >= 0) hits.push({ item: item, score: score });
+  function prepareIndex(data) {
+    var maxima = { song: 1, album: 1, movie: 1 };
+    var records = [];
+    (data.songs || []).forEach(function (s) {
+      var pop = Number(s.playsNum) || 0;
+      maxima.song = Math.max(maxima.song, pop);
+      records.push({
+        type: "song", raw: s, id: s.id, title: s.title, titleN: norm(s.title), pop: pop,
+        year: toInt(s.year), release: s.release || "", lang: norm(s.language),
+        genres: (s.genres || []).concat(s.movieGenres || []).map(norm),
+        href: "/song/" + s.id + "/", art: s.artwork || s.poster || "",
+        sub: s.movieTitle + (s.year ? " · " + s.year : "") + ((s.artists || []).length ? " · " + s.artists.slice(0, 2).join(", ") : ""),
+        meta: s.plays || "",
+        hay: norm([s.movieTitle, s.albumTitle, (s.artists || []).join(" "), (s.lyricists || []).join(" "),
+          (s.musicDirectors || []).join(" "), (s.genres || []).join(" "), s.language, s.year].join(" "))
+      });
     });
-    hits.sort(function (a, b) {
-      var playsA = Number(a.item.playsNum || a.item.plays || 0);
-      var playsB = Number(b.item.playsNum || b.item.plays || 0);
-      return a.score - b.score || playsB - playsA || String(b.item.year || "").localeCompare(String(a.item.year || ""));
+    (data.albums || []).forEach(function (a) {
+      var pop = Number(a.plays) || 0;
+      maxima.album = Math.max(maxima.album, pop);
+      records.push({
+        type: "album", raw: a, id: a.slug, title: a.title, titleN: norm(a.title), pop: pop,
+        year: toInt(a.year), release: a.release || "", lang: norm(a.language),
+        genres: (a.genres || []).map(norm),
+        href: a.path, art: a.artwork || "",
+        sub: a.movieTitle + (a.year ? " · " + a.year : "") + " · " + a.songs + (a.songs === 1 ? " song" : " songs"),
+        meta: pop ? formatCount(pop) : "",
+        hay: norm([a.movieTitle, (a.musicDirectors || []).join(" "), (a.genres || []).join(" "), a.language, a.year].join(" "))
+      });
     });
-    return hits.slice(0, limit).map(function (hit) { return hit.item; });
+    (data.movies || []).forEach(function (m) {
+      var pop = Number(m.imdbVotesNumeric) || 0;
+      maxima.movie = Math.max(maxima.movie, pop);
+      records.push({
+        type: "movie", raw: m, id: m.slug, title: m.title, titleN: norm(m.title), pop: pop,
+        year: toInt(m.year), release: m.released || (m.year ? m.year + "-01-01" : ""), lang: norm(m.originalLanguage),
+        genres: (m.genres || []).map(norm),
+        href: m.path, art: m.poster || m.artwork || "",
+        sub: (m.year || "") + (m.originalLanguage ? " · " + m.originalLanguage : "") + " · " + m.songs + (m.songs === 1 ? " song" : " songs"),
+        meta: m.imdbScore ? "★ " + m.imdbScore : "",
+        hay: norm([m.telugu, (m.musicDirectors || []).join(" "), (m.directors || []).join(" "), (m.cast || []).join(" "),
+          (m.genres || []).join(" "), m.originalLanguage, m.year, m.imdbId, m.universe, m.certification].join(" "))
+      });
+    });
+    records.forEach(function (r) { r.popN = r.pop / maxima[r.type]; });
+    var byId = {};
+    (data.songs || []).forEach(function (s) { byId[s.id] = s; });
+    return { records: records, songs: byId };
   }
 
-  function rankSongs(raw, limit) {
-    return rankItems((index && index.songs) || [], raw, fieldsForSong, limit || 40);
+  /* ------------------------------------------------------- search scoring */
+  var TYPE_LABEL = { song: "Songs", album: "Albums", movie: "Movies" };
+  var TYPE_SINGULAR = { song: "SONG", album: "ALBUM", movie: "MOVIE" };
+
+  function emptyState() { return { q: "", type: "all", from: "", to: "", lang: "", genre: "", sort: "relevance" }; }
+  function isActive(state) {
+    return !!(state.q || state.from || state.to || state.lang || state.genre || state.type !== "all");
   }
 
-  function rankMovies(raw, limit) {
-    return rankItems((index && index.movies) || [], raw, fieldsForMovie, limit || 20);
-  }
-
-  function fieldsForAlbum(album) {
-    return [album.title, album.movieTitle, album.year, album.imdbId, album.artist, (album.musicDirectors || []).join(" "),
-      (album.genres || []).join(" "), album.release, album.songs];
-  }
-
-  function rankAlbums(raw, limit) {
-    return rankItems((index && index.albums) || [], raw, fieldsForAlbum, limit || 20);
-  }
-
-  function makeElement(tag, className, text) {
-    var element = document.createElement(tag);
-    if (className) element.className = className;
-    if (text !== undefined && text !== null) element.textContent = text;
-    return element;
-  }
-
-  function makeSearchRow(href, number, title, subtitle, meta) {
-    var li = makeElement("li", "track");
-    var link = makeElement("a");
-    link.href = href;
-    var n = makeElement("span", "n", String(number));
-    var main = makeElement("span", "main");
-    main.appendChild(makeElement("span", "name", title));
-    main.appendChild(makeElement("span", "sub", subtitle || ""));
-    var side = makeElement("span", "meta", meta || "");
-    link.appendChild(n);
-    link.appendChild(main);
-    link.appendChild(side);
-    li.appendChild(link);
-    return li;
-  }
-
-  function setPopoverOpen(open) {
-    if (!popover || !input) return;
-    popover.hidden = !open;
-    input.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-
-  function makeSuggestion(href, icon, title, subtitle) {
-    var link = makeElement("a", "search-suggestion");
-    link.href = href;
-    link.appendChild(makeElement("span", "suggestion-icon", icon));
-    var copy = makeElement("span", "suggestion-copy");
-    copy.appendChild(makeElement("span", "suggestion-title", title));
-    copy.appendChild(makeElement("span", "suggestion-subtitle", subtitle || ""));
-    link.appendChild(copy);
-    link.appendChild(makeElement("span", "suggestion-arrow", "↗"));
-    return link;
-  }
-
-  function renderSuggestions(raw) {
-    if (!popover || !input) return;
-    var value = String(raw || "").trim();
-    if (!value) {
-      setPopoverOpen(false);
-      popover.textContent = "";
-      return;
+  function scoreRecord(record, tokens) {
+    var score = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i], hit = 0;
+      var at = record.titleN.indexOf(token);
+      if (record.titleN === token) hit = 120;
+      else if (at === 0) hit = 80;
+      else if (at > 0 && record.titleN.charAt(at - 1) === " ") hit = 55;
+      else if (at > 0) hit = 30;
+      else if (record.hay.indexOf(token) !== -1) hit = 12;
+      if (!hit) return 0;
+      score += hit;
     }
-    if (!index) return;
-    popover.textContent = "";
-    var songs = rankSongs(value, 5);
-    var movies = rankMovies(value, 3);
-    var count = 0;
-    if (songs.length) {
-      popover.appendChild(makeElement("p", "suggestion-heading", "SONGS"));
-      songs.forEach(function (song) {
-        popover.appendChild(makeSuggestion("/song/" + encodeURIComponent(song.id) + "/", "♫", song.title,
-          song.movieTitle + " · " + song.year));
-        count += 1;
+    return score + record.popN * 6;
+  }
+
+  function runSearch(index, state) {
+    var tokens = norm(state.q).split(/\s+/).filter(Boolean);
+    var from = toInt(state.from), to = toInt(state.to);
+    var lang = norm(state.lang), genre = norm(state.genre);
+    var out = [];
+    index.records.forEach(function (r) {
+      if (state.type !== "all" && r.type !== state.type) return;
+      if (from !== null && (r.year === null || r.year < from)) return;
+      if (to !== null && (r.year === null || r.year > to)) return;
+      if (lang && r.lang !== lang) return;
+      if (genre && r.genres.indexOf(genre) === -1) return;
+      var score = tokens.length ? scoreRecord(r, tokens) : 1 + r.popN;
+      if (!score) return;
+      out.push({ r: r, score: score });
+    });
+    var cmpTitle = function (a, b) { return a.r.titleN < b.r.titleN ? -1 : a.r.titleN > b.r.titleN ? 1 : 0; };
+    var sorters = {
+      relevance: function (a, b) { return b.score - a.score || cmpTitle(a, b); },
+      popular: function (a, b) { return b.r.popN - a.r.popN || b.score - a.score || cmpTitle(a, b); },
+      newest: function (a, b) { return (a.r.release < b.r.release ? 1 : a.r.release > b.r.release ? -1 : 0) || cmpTitle(a, b); },
+      oldest: function (a, b) { return (a.r.release < b.r.release ? -1 : a.r.release > b.r.release ? 1 : 0) || cmpTitle(a, b); },
+      title: cmpTitle
+    };
+    out.sort(sorters[state.sort] || sorters.relevance);
+    return out;
+  }
+
+  /* ----------------------------------------------------- result renderers */
+  function artMarkup(record, cls) {
+    if (record.art) {
+      return '<img class="' + cls + '" src="' + esc(safeUrl(record.art) || record.art) + '" alt="" width="56" height="56" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+    }
+    return '<span class="' + cls + ' sp-art" aria-hidden="true">' + icon("note") + "</span>";
+  }
+  function rowMarkup(entry) {
+    var r = entry.r;
+    return '<a class="sp-row" role="option" href="' + esc(r.href) + '" data-type="' + r.type + '" data-result>' + artMarkup(r, "sp-img") +
+      '<span class="sp-copy"><span class="sp-title">' + esc(r.title) + '</span><span class="sp-sub">' + esc(TYPE_SINGULAR[r.type].charAt(0) + TYPE_SINGULAR[r.type].slice(1).toLowerCase() + " · " + r.sub) + "</span></span>" +
+      '<span class="sp-meta">' + esc(r.meta) + "</span></a>";
+  }
+  function cardMarkup(entry) {
+    var r = entry.r;
+    return '<a class="advanced-result-card" href="' + esc(r.href) + '" data-type="' + r.type + '" data-result>' + artMarkup(r, "advanced-result-art") +
+      '<span class="advanced-result-copy"><span class="advanced-result-type">' + TYPE_SINGULAR[r.type] + '</span><span class="advanced-result-title">' + esc(r.title) +
+      '</span><span class="advanced-result-subtitle">' + esc(r.sub) + "</span></span>" + '<span class="advanced-result-arrow">' + icon("arrow") + "</span></a>";
+  }
+
+  /* ----------------------------------------------------- search controller */
+  function searchUrl(state) {
+    var params = new URLSearchParams();
+    ["q", "type", "from", "to", "lang", "genre", "sort"].forEach(function (key) {
+      var def = key === "type" ? "all" : key === "sort" ? "relevance" : "";
+      if (state[key] && state[key] !== def) params.set(key, state[key]);
+    });
+    var text = params.toString();
+    return "/advanced-search/" + (text ? "?" + text : "");
+  }
+
+  function initSearch(root, getIndex) {
+    var mode = root.getAttribute("data-search-mode") || root.getAttribute("data-search-root");
+    var input = $("[data-search-input]", root);
+    if (!input) return;
+    var optionsBox = $("[data-search-options]", root);
+    var toggle = $("[data-filter-toggle]", root);
+    var typeButtons = $$(".sp-type", root);
+    var filters = {};
+    $$("[data-filter]", root).forEach(function (el) { filters[el.getAttribute("data-filter")] = el; });
+    var resetButton = $("[data-search-reset]", root);
+    var popover = mode === "popover" ? $("#search-popover", root) : null;
+    var targetId = root.getAttribute("data-search-target");
+    var body = popover ? $("[data-search-body]", popover) : (targetId ? document.getElementById(targetId) : null);
+    var countEl = mode === "page" ? $("[data-search-count]") : null;
+    var emptyEl = mode === "page" ? document.getElementById("advanced-empty") : null;
+    var statusEl = document.getElementById("status");
+    var state = emptyState();
+    var active = -1;
+
+    function readControls() {
+      state.q = input.value.trim();
+      Object.keys(filters).forEach(function (key) { state[key] = filters[key].value; });
+    }
+    function writeControls() {
+      input.value = state.q;
+      Object.keys(filters).forEach(function (key) { filters[key].value = state[key]; });
+      typeButtons.forEach(function (btn) {
+        var on = btn.getAttribute("data-type") === state.type;
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
-    if (movies.length) {
-      popover.appendChild(makeElement("p", "suggestion-heading", "MOVIES"));
-      movies.forEach(function (movie) {
-        popover.appendChild(makeSuggestion(movie.path || ("/movie/" + encodeURIComponent(movie.slug) + "/"), "▣", movie.title,
-          movie.year + " · " + movie.songs + (movie.songs === 1 ? " song" : " songs")));
-        count += 1;
+    function setOptionsOpen(open) {
+      if (!optionsBox) return;
+      optionsBox.hidden = !open;
+      if (toggle) {
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        toggle.classList.toggle("is-active", open);
+      }
+    }
+    function filterCount() {
+      return ["from", "to", "lang", "genre"].filter(function (k) { return state[k]; }).length + (state.sort !== "relevance" ? 1 : 0);
+    }
+    function loadFromUrl() {
+      var params = new URLSearchParams(window.location.search);
+      var any = false;
+      ["q", "type", "from", "to", "lang", "genre", "sort"].forEach(function (key) {
+        var value = params.get(key);
+        if (value != null && value !== "") { state[key] = value; any = true; }
+      });
+      if (["all", "song", "album", "movie"].indexOf(state.type) === -1) state.type = "all";
+      if (["relevance", "popular", "newest", "oldest", "title"].indexOf(state.sort) === -1) state.sort = "relevance";
+      return any;
+    }
+    function syncUrl() {
+      if (mode === "popover" || !window.history.replaceState) return;
+      var url = mode === "page" ? searchUrl(state) : (function () {
+        var u = searchUrl(state).replace("/advanced-search/", window.location.pathname);
+        return u;
+      })();
+      try { window.history.replaceState(null, "", url); } catch (error) {}
+    }
+
+    function setActive(next) {
+      var rows = $$("[data-result]", body);
+      if (!rows.length) { active = -1; return; }
+      active = (next + rows.length) % rows.length;
+      rows.forEach(function (row, i) { row.classList.toggle("is-active", i === active); row.setAttribute("aria-selected", i === active ? "true" : "false"); });
+      rows[active].scrollIntoView({ block: "nearest" });
+    }
+
+    function renderPopover(results) {
+      var html = "";
+      var perType = state.type === "all" ? 4 : 8;
+      var groups = { song: [], album: [], movie: [] };
+      results.forEach(function (entry) { groups[entry.r.type].push(entry); });
+      var order = state.type === "all" ? ["song", "album", "movie"] : [state.type];
+      var shown = 0;
+      order.forEach(function (type) {
+        var list = groups[type].slice(0, perType);
+        if (!list.length) return;
+        shown += list.length;
+        html += '<p class="sp-group">' + TYPE_LABEL[type] + "</p>" + list.map(rowMarkup).join("");
+      });
+      if (!shown) html = '<p class="sp-empty">No matches. Try another spelling, or widen the filters.</p>';
+      else html += '<a class="sp-all" href="' + esc(searchUrl(state)) + '">See all ' + results.length + " results " + "→</a>";
+      body.innerHTML = html;
+      active = -1;
+    }
+
+    function renderGrouped(results) {
+      var groups = { song: [], album: [], movie: [] };
+      results.forEach(function (entry) { groups[entry.r.type].push(entry); });
+      var html = "";
+      ["song", "album", "movie"].forEach(function (type) {
+        if (!groups[type].length) return;
+        html += '<section class="results-group"><h2>' + TYPE_LABEL[type] + ' <small class="sub">' + groups[type].length + '</small></h2><div class="advanced-results-grid">' +
+          groups[type].slice(0, 24).map(cardMarkup).join("") + "</div></section>";
+      });
+      body.innerHTML = html;
+    }
+
+    function renderFlat(results) {
+      body.innerHTML = results.slice(0, 90).map(cardMarkup).join("");
+    }
+
+    function update(opts) {
+      opts = opts || {};
+      readControls();
+      writeControls_types();
+      if (toggle && mode === "popover") {
+        toggle.classList.toggle("has-filters", filterCount() > 0);
+      }
+      if (mode === "popover") {
+        openPopover();
+        if (!isActive(state)) {
+          // nothing typed yet: offer the most played songs
+          getIndex().then(function (index) {
+            if (isActive(readState())) return;
+            var top = index.records.filter(function (r) { return r.type === "song"; }).sort(function (a, b) { return b.pop - a.pop; }).slice(0, 5)
+              .map(function (r) { return { r: r }; });
+            body.innerHTML = '<p class="sp-group">Most played</p>' + top.map(rowMarkup).join("");
+            active = -1;
+          }).catch(showError);
+          return;
+        }
+      }
+      if (!isActive(state)) {
+        if (body) body.innerHTML = "";
+        if (mode === "inline" && body) body.hidden = true;
+        if (countEl) countEl.textContent = "Enter a term to search the archive.";
+        if (emptyEl) emptyEl.hidden = true;
+        if (statusEl) statusEl.textContent = "";
+        if (!opts.silentUrl) syncUrl();
+        return;
+      }
+      getIndex().then(function (index) {
+        readControls();
+        var results = runSearch(index, state);
+        if (mode === "popover") renderPopover(results);
+        else if (mode === "inline") {
+          body.hidden = false;
+          if (results.length) renderGrouped(results);
+          else body.innerHTML = '<p class="empty">No matches. Try another spelling, or widen the filters.</p>';
+        } else {
+          if (results.length) renderFlat(results); else body.innerHTML = "";
+          if (emptyEl) emptyEl.hidden = results.length > 0;
+        }
+        var text = results.length + (results.length === 1 ? " result" : " results");
+        if (countEl) countEl.textContent = text + (results.length > 90 ? " (showing the first 90)" : "");
+        if (statusEl) statusEl.textContent = text;
+        if (!opts.silentUrl) syncUrl();
+      }).catch(showError);
+    }
+    function readState() { readControls(); return state; }
+    function writeControls_types() {
+      typeButtons.forEach(function (btn) {
+        var on = btn.getAttribute("data-type") === state.type;
+        btn.classList.toggle("is-active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
-    var albums = rankAlbums(value, 3);
-    if (albums.length) {
-      popover.appendChild(makeElement("p", "suggestion-heading", "ALBUMS"));
-      albums.forEach(function (album) {
-        popover.appendChild(makeSuggestion(album.path, "◉", album.title,
-          album.movieTitle + " · " + album.year + " · " + album.songs + (album.songs === 1 ? " song" : " songs")));
-        count += 1;
-      });
+    function showError() {
+      if (body) {
+        body.hidden = false;
+        body.innerHTML = '<p class="sp-empty">Search is unavailable right now. Please try again in a moment.</p>';
+      }
     }
-    if (!count) {
-      popover.appendChild(makeElement("p", "suggestion-empty", "No results found. Try a song, movie, singer or music director."));
-    }
-    var all = makeElement("a", "suggestion-all", "See all results for “" + value + "” ↗");
-    all.href = "/advanced-search/?q=" + encodeURIComponent(value);
-    popover.appendChild(all);
-    setPopoverOpen(true);
-  }
 
-  function renderHomeResults(raw) {
-    if (!browse || !results || !songSection || !albumSection || !filmSection || !songList || !albumList || !filmList || !empty) return;
-    var query = String(raw || "").trim();
-    if (!query) {
-      results.hidden = true;
-      browse.hidden = false;
-      if (status) status.textContent = "";
-      return;
+    function openPopover() {
+      if (!popover || !popover.hidden) return;
+      popover.hidden = false;
+      input.setAttribute("aria-expanded", "true");
     }
-    if (!index) return;
-    var songs = rankSongs(query, 40);
-    var albums = rankAlbums(query, 20);
-    var movies = rankMovies(query, 20);
-    songList.textContent = "";
-    albumList.textContent = "";
-    filmList.textContent = "";
-    songs.forEach(function (song, i) {
-      songList.appendChild(makeSearchRow("/song/" + encodeURIComponent(song.id) + "/", i + 1,
-        song.title, song.movieTitle + ", " + song.year, song.plays || ""));
-    });
-    albums.forEach(function (album, i) {
-      albumList.appendChild(makeSearchRow(album.path, i + 1, album.title,
-        album.movieTitle + ", " + album.year,
-        album.songs + (album.songs === 1 ? " song" : " songs")));
-    });
-    movies.forEach(function (movie, i) {
-      var voteLabel = movie.imdbVotes ? "IMDb " + (movie.imdbScore || "—") + " · " + movie.imdbVotes + " votes" : "";
-      var subtitle = [movie.year, voteLabel].filter(Boolean).join(" · ");
-      filmList.appendChild(makeSearchRow(movie.path || ("/movie/" + encodeURIComponent(movie.slug) + "/"), i + 1,
-        movie.title, subtitle + (movie.genres && movie.genres.length ? " · " + movie.genres.slice(0, 2).join(", ") : ""),
-        movie.songs + (movie.songs === 1 ? " song" : " songs")));
-    });
-    songSection.hidden = songs.length === 0;
-    albumSection.hidden = albums.length === 0;
-    filmSection.hidden = movies.length === 0;
-    var total = songs.length + albums.length + movies.length;
-    var none = total === 0;
-    empty.hidden = !none;
-    empty.textContent = none ? "Nothing found for “" + query + "”. Try a song, movie, album, singer or music director." : "";
-    results.hidden = false;
-    browse.hidden = true;
-    if (status) status.textContent = none ? "No results" : songs.length + " songs, " + albums.length + " albums and " + movies.length + " movies found";
-  }
+    function closePopover() {
+      if (!popover || popover.hidden) return;
+      popover.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      active = -1;
+    }
 
-  if (input) {
+    var debounced = debounce(function () { update(); }, 90);
+
+    input.addEventListener("input", debounced);
     input.addEventListener("focus", function () {
-      loadIndex().then(function () { if (input.value.trim()) renderSuggestions(input.value); }).catch(function () {});
+      getIndex().catch(function () {});
+      if (mode === "popover") update({ silentUrl: true });
     });
-    input.addEventListener("input", function () {
-      var value = input.value;
-      if (!value.trim()) {
-        renderSuggestions("");
+    typeButtons.forEach(function (btn) {
+      btn.addEventListener("click", function () { state.type = btn.getAttribute("data-type"); update(); if (mode !== "page") input.focus(); });
+    });
+    Object.keys(filters).forEach(function (key) {
+      filters[key].addEventListener(filters[key].tagName === "SELECT" ? "change" : "input", debounced);
+    });
+    if (resetButton) {
+      resetButton.addEventListener("click", function () {
+        var keep = state.q;
+        state = emptyState();
+        state.q = keep;
+        writeControls();
+        update();
+      });
+    }
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        var open = optionsBox ? optionsBox.hidden : false;
+        if (mode === "popover") openPopover();
+        setOptionsOpen(open);
+        if (mode === "popover") update({ silentUrl: true });
+      });
+    }
+
+    root.addEventListener("submit", function (event) {
+      event.preventDefault();
+      readControls();
+      if (mode === "popover") {
+        window.location.href = searchUrl(state);
         return;
       }
-      loadIndex().then(function () {
-        renderSuggestions(value);
-      }).catch(function () {
-        if (popover) {
-          popover.textContent = "Search is temporarily unavailable. Press Enter to try again.";
-          setPopoverOpen(true);
+      update();
+      if (mode === "inline" && body && !body.hidden) body.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+    });
+
+    if (mode === "popover") {
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown") { event.preventDefault(); openPopover(); setActive(active + 1); }
+        else if (event.key === "ArrowUp") { event.preventDefault(); setActive(active - 1); }
+        else if (event.key === "Enter") {
+          event.preventDefault();
+          var rows = $$("[data-result]", body);
+          if (active >= 0 && rows[active]) rows[active].click();
+          else { readControls(); window.location.href = searchUrl(state); }
+        } else if (event.key === "Escape") { closePopover(); }
+      });
+      // the popover form has no submit button, so Enter in its filter fields is handled here
+      root.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && event.target !== input && event.target.tagName === "INPUT") {
+          event.preventDefault();
+          readControls();
+          window.location.href = searchUrl(state);
         }
       });
-    });
-    input.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") setPopoverOpen(false);
-    });
-  }
-
-  if (searchForm) {
-    // The form is intentionally allowed to submit to /?q=... on every page.
-    // This makes Enter and the search button work even before JavaScript loads.
-    searchForm.addEventListener("submit", function () {
-      if (input) input.value = input.value.trim();
-    });
-  }
-
-  if (homeInput) {
-    function runHomeSearch() {
-      var value = homeInput.value.trim();
-      if (!value) {
-        renderHomeResults("");
-        return;
-      }
-      loadIndex().then(function () {
-        renderHomeResults(value);
-      }).catch(function () {
-        if (results && browse) {
-          results.hidden = false;
-          browse.hidden = true;
-          if (empty) {
-            empty.hidden = false;
-            empty.textContent = "Search could not load. Please refresh and try again.";
-          }
-        }
+      document.addEventListener("click", function (event) {
+        if (!root.contains(event.target)) closePopover();
       });
-    }
-    homeInput.addEventListener("input", runHomeSearch);
-    if (homeSearchForm) {
-      homeSearchForm.addEventListener("submit", function () {
-        homeInput.value = homeInput.value.trim();
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && popover && !popover.hidden) { event.vkHandled = true; closePopover(); }
       });
-    }
-  }
-
-  document.addEventListener("click", function (event) {
-    if (popover && input && !event.target.closest(".header-search")) setPopoverOpen(false);
-  });
-
-  var initialQuery = new URLSearchParams(window.location.search).get("q");
-  if (initialQuery) {
-    if (input) input.value = initialQuery;
-    if (homeInput) homeInput.value = initialQuery;
-    if (browse && results) {
-      loadIndex().then(function () { renderHomeResults(initialQuery); }).catch(function () {
-        results.hidden = false;
-        browse.hidden = true;
-        if (empty) {
-          empty.hidden = false;
-          empty.textContent = "Search could not load. Please refresh and try again.";
+      root.addEventListener("click", function (event) {
+        if (event.target.closest && event.target.closest("[data-result], .sp-all")) closePopover();
+      });
+      // "/" focuses search from anywhere outside a field
+      document.addEventListener("keydown", function (event) {
+        var tag = (event.target.tagName || "").toLowerCase();
+        if (event.key === "/" && !event.metaKey && !event.ctrlKey && tag !== "input" && tag !== "textarea" && tag !== "select") {
+          event.preventDefault();
+          input.focus();
+          input.select();
         }
       });
     }
-  }
 
-  // Keep catalogue filters expanded on desktop, collapsed by default on phones.
-  // Native <details> preserves keyboard and no-JavaScript accessibility.
-  function initResponsiveFilterPanels() {
-    var panels = Array.prototype.slice.call(document.querySelectorAll(".filter-panel"));
-    if (!panels.length || !window.matchMedia) return;
-    var mobile = window.matchMedia("(max-width: 800px)");
-    function syncPanels() {
-      panels.forEach(function (panel) { panel.open = !mobile.matches; });
+    // initial state
+    if (mode !== "popover") {
+      var hadParams = loadFromUrl();
+      writeControls();
+      if (mode === "page") setOptionsOpen(true);
+      else if (filterCount() > 0 || state.type !== "all") setOptionsOpen(true);
+      if (hadParams || isActive(state)) update({ silentUrl: true });
     }
-    syncPanels();
-    if (typeof mobile.addEventListener === "function") mobile.addEventListener("change", syncPanels);
-    else if (typeof mobile.addListener === "function") mobile.addListener(syncPanels);
   }
 
-  function syncFilterSummaryCount(countId, summaryId) {
-    var count = document.getElementById(countId);
-    var summary = document.getElementById(summaryId);
-    if (count && summary) summary.textContent = count.textContent;
-  }
+  /* ------------------------------------------------------- catalogue lists */
+  function initCatalogue(config) {
+    var grid = document.getElementById(config.grid);
+    if (!grid) return;
+    var items = $$(config.item, grid);
+    var emptyEl = document.getElementById(config.empty);
+    var countEl = document.getElementById(config.count);
+    var summaryEl = document.getElementById(config.summary);
+    var controls = {};
+    Object.keys(config.controls).forEach(function (key) { controls[key] = document.getElementById(config.controls[key]); });
+    var originalOrder = items.slice();
 
-  // Catalogue filters progressively enhance the statically sorted grids.
-  function applyAlbumFilters() {
-    var grid = document.getElementById("album-grid");
-    var query = document.getElementById("album-query");
-    var sort = document.getElementById("album-sort");
-    var artist = document.getElementById("album-artist");
-    var genre = document.getElementById("album-genre");
-    var from = document.getElementById("album-from");
-    var to = document.getElementById("album-to");
-    var count = document.getElementById("album-count");
-    var noResults = document.getElementById("album-empty");
-    if (!grid || !query || !sort || !artist) return;
-    var cards = Array.prototype.slice.call(grid.querySelectorAll(".album-item"));
-    function update() {
-      var term = norm(query.value);
-      var selectedArtist = artist.value;
-      var selectedGenre = genre ? genre.value : "";
-      var fromDate = from ? from.value : "";
-      var toDate = to ? to.value : "";
-      var visible = cards.filter(function (card) {
-        var release = card.dataset.release || "";
-        return (!term || norm(card.dataset.title).indexOf(term) >= 0)
-          && (!selectedArtist || (card.dataset.artist || "").split("|").indexOf(selectedArtist) >= 0)
-          && (!selectedGenre || (card.dataset.genre || "").split("|").indexOf(selectedGenre) >= 0)
-          && (!fromDate || (release && release >= fromDate))
-          && (!toDate || (release && release <= toDate));
-      });
-      var ordering = sort.value;
-      visible.sort(function (a, b) {
-        var av, bv;
-        if (ordering === "release-new") return (b.dataset.release || "").localeCompare(a.dataset.release || "");
-        if (ordering === "release-old") return (a.dataset.release || "").localeCompare(b.dataset.release || "");
-        if (ordering === "title-az") return (a.dataset.title || "").localeCompare(b.dataset.title || "");
-        if (ordering === "title-za") return (b.dataset.title || "").localeCompare(a.dataset.title || "");
-        if (ordering === "songs") return Number(b.dataset.songs || 0) - Number(a.dataset.songs || 0);
-        av = Number(a.dataset.plays || 0); bv = Number(b.dataset.plays || 0);
-        return bv - av;
-      });
-      visible.forEach(function (card) { card.hidden = false; grid.appendChild(card); });
-      cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
-      if (count) count.textContent = visible.length + (visible.length === 1 ? " album" : " albums");
-      syncFilterSummaryCount("album-count", "album-filter-summary-count");
-      if (noResults) noResults.hidden = visible.length > 0;
-    }
-    query.addEventListener("input", update);
-    sort.addEventListener("change", update);
-    artist.addEventListener("change", update);
-    [genre, from, to].forEach(function (control) { if (control) control.addEventListener("change", update); });
-    update();
-  }
+    function tokens(item, attr) { return (item.getAttribute(attr) || "").split("|"); }
+    function num(item, attr) { return Number(item.getAttribute(attr)) || 0; }
+    function str(item, attr) { return item.getAttribute(attr) || ""; }
 
-  function applyMovieFilters() {
-    var grid = document.getElementById("movie-grid");
-    var query = document.getElementById("movie-query");
-    var sort = document.getElementById("movie-sort");
-    var genre = document.getElementById("movie-genre");
-    var music = document.getElementById("movie-music");
-    var director = document.getElementById("movie-director");
-    var from = document.getElementById("movie-from");
-    var to = document.getElementById("movie-to");
-    var count = document.getElementById("movie-count");
-    var noResults = document.getElementById("movie-empty");
-    if (!grid || !query || !sort || !genre || !music || !director) return;
-    var cards = Array.prototype.slice.call(grid.querySelectorAll(".movie-item"));
-    function update() {
-      var term = norm(query.value);
-      var selectedGenre = genre.value;
-      var selectedMusic = music.value;
-      var selectedDirector = director.value;
-      var fromDate = from ? from.value : "";
-      var toDate = to ? to.value : "";
-      var visible = cards.filter(function (card) {
-        var titleMatch = !term || norm(card.dataset.title).indexOf(term) >= 0;
-        var genreMatch = !selectedGenre || (card.dataset.genre || "").split("|").indexOf(selectedGenre) >= 0;
-        var musicMatch = !selectedMusic || (card.dataset.music || "").split("|").indexOf(selectedMusic) >= 0;
-        var directorMatch = !selectedDirector || (card.dataset.director || "").split("|").indexOf(selectedDirector) >= 0;
-        var release = card.dataset.release || "";
-        var dateMatch = (!fromDate || (release && release >= fromDate)) && (!toDate || (release && release <= toDate));
-        return titleMatch && genreMatch && musicMatch && directorMatch && dateMatch;
-      });
-      var ordering = sort.value;
-      visible.sort(function (a, b) {
-        if (ordering === "imdb-votes") {
-          return Number(b.dataset.imdbVotes || 0) - Number(a.dataset.imdbVotes || 0)
-            || (a.dataset.title || "").localeCompare(b.dataset.title || "");
+    function apply() {
+      var q = norm(controls.query ? controls.query.value : "");
+      var qTokens = q.split(/\s+/).filter(Boolean);
+      var from = controls.from ? toInt(controls.from.value) : null;
+      var to = controls.to ? toInt(controls.to.value) : null;
+      var sort = controls.sort ? controls.sort.value : config.defaultSort;
+      var visible = [];
+      items.forEach(function (item) {
+        var ok = true;
+        if (qTokens.length) {
+          var hay = norm(config.search.map(function (attr) { return str(item, attr).replace(/\|/g, " "); }).join(" "));
+          ok = qTokens.every(function (t) { return hay.indexOf(t) !== -1; });
         }
-        if (ordering === "release-old") return (a.dataset.release || "").localeCompare(b.dataset.release || "");
-        if (ordering === "title-az") return (a.dataset.title || "").localeCompare(b.dataset.title || "");
-        if (ordering === "title-za") return (b.dataset.title || "").localeCompare(a.dataset.title || "");
-        if (ordering === "songs") return Number(b.dataset.songs || 0) - Number(a.dataset.songs || 0);
-        return (b.dataset.release || "").localeCompare(a.dataset.release || "");
+        if (ok) {
+          Object.keys(config.match).forEach(function (key) {
+            if (!ok || !controls[key]) return;
+            var value = controls[key].value;
+            if (!value) return;
+            var spec = config.match[key];
+            var have = tokens(item, spec.attr);
+            if (have.indexOf(value) === -1) ok = false;
+          });
+        }
+        if (ok && (from !== null || to !== null)) {
+          var year = toInt(item.getAttribute("data-year"));
+          if (year === null) ok = false;
+          else if (from !== null && year < from) ok = false;
+          else if (to !== null && year > to) ok = false;
+        }
+        item.hidden = !ok;
+        if (ok) visible.push(item);
       });
-      visible.forEach(function (card) { card.hidden = false; grid.appendChild(card); });
-      cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
-      if (count) count.textContent = visible.length + (visible.length === 1 ? " movie" : " movies");
-      syncFilterSummaryCount("movie-count", "movie-filter-summary-count");
-      if (noResults) noResults.hidden = visible.length > 0;
+
+      var byTitle = function (a, b) { var x = str(a, "data-title"), y = str(b, "data-title"); return x < y ? -1 : x > y ? 1 : 0; };
+      var sorters = {
+        "plays": function (a, b) { return num(b, "data-plays") - num(a, "data-plays") || byTitle(a, b); },
+        "imdb-votes": function (a, b) { return num(b, "data-imdb-votes") - num(a, "data-imdb-votes") || byTitle(a, b); },
+        "rating": function (a, b) { return num(b, "data-rating") - num(a, "data-rating") || num(b, "data-imdb-votes") - num(a, "data-imdb-votes") || byTitle(a, b); },
+        "weighted": function (a, b) { return num(b, "data-weighted") - num(a, "data-weighted") || byTitle(a, b); },
+        "release-new": function (a, b) { return str(b, "data-release") < str(a, "data-release") ? -1 : str(b, "data-release") > str(a, "data-release") ? 1 : byTitle(a, b); },
+        "release-old": function (a, b) { return str(a, "data-release") < str(b, "data-release") ? -1 : str(a, "data-release") > str(b, "data-release") ? 1 : byTitle(a, b); },
+        "title-az": byTitle,
+        "title-za": function (a, b) { return byTitle(b, a); },
+        "songs": function (a, b) { return num(b, "data-songs") - num(a, "data-songs") || byTitle(a, b); }
+      };
+      var sorter = sorters[sort] || sorters[config.defaultSort];
+      var ordered = items.slice().sort(sorter);
+      var fragment = document.createDocumentFragment();
+      ordered.forEach(function (item) { fragment.appendChild(item); });
+      grid.appendChild(fragment);
+
+      var position = 0;
+      var rankSorts = config.rankSorts || [];
+      ordered.forEach(function (item) {
+        if (item.hidden) return;
+        position += 1;
+        if (config.renumber) {
+          var n = $(".n", item);
+          if (n) n.textContent = position;
+        }
+        if (config.rankBadge) {
+          var badge = $("[data-rank]", item);
+          if (badge) badge.textContent = rankSorts.indexOf(sort) !== -1 ? position : "";
+        }
+      });
+
+      var label = config.noun[visible.length === 1 ? 0 : 1];
+      var text = visible.length + " " + label;
+      if (countEl) countEl.textContent = text;
+      if (summaryEl) summaryEl.textContent = text;
+      if (emptyEl) emptyEl.hidden = visible.length > 0;
+      grid.hidden = visible.length === 0;
     }
-    [query, sort, genre, music, director, from, to].forEach(function (control) {
-      if (control) control.addEventListener(control.tagName === "INPUT" && control.type !== "date" ? "input" : "change", update);
+
+    var debounced = debounce(apply, 80);
+    Object.keys(controls).forEach(function (key) {
+      var el = controls[key];
+      if (!el) return;
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", debounced);
     });
-    update();
-  }
-
-  function applySongFilters() {
-    var grid = document.getElementById("song-grid");
-    var query = document.getElementById("song-query");
-    var sort = document.getElementById("song-sort");
-    var artist = document.getElementById("song-artist");
-    var lyricist = document.getElementById("song-lyricist");
-    var music = document.getElementById("song-music");
-    var genre = document.getElementById("song-genre");
-    var from = document.getElementById("song-from");
-    var to = document.getElementById("song-to");
-    var count = document.getElementById("song-count");
-    var noResults = document.getElementById("song-empty");
-    if (!grid || !query || !sort) return;
-    var cards = Array.prototype.slice.call(grid.querySelectorAll(".song-catalog-item"));
-    function update() {
-      var term = norm(query.value);
-      var selectedArtist = artist ? artist.value : "";
-      var selectedLyricist = lyricist ? lyricist.value : "";
-      var selectedMusic = music ? music.value : "";
-      var selectedGenre = genre ? genre.value : "";
-      var fromDate = from ? from.value : "";
-      var toDate = to ? to.value : "";
-      var visible = cards.filter(function (card) {
-        var release = card.dataset.release || "";
-        return (!term || norm([card.dataset.title, card.dataset.artists, card.dataset.lyricists, card.dataset.music, card.dataset.album].join(" ")).indexOf(term) >= 0)
-          && (!selectedArtist || (card.dataset.artists || "").split("|").indexOf(selectedArtist) >= 0)
-          && (!selectedLyricist || (card.dataset.lyricists || "").split("|").indexOf(selectedLyricist) >= 0)
-          && (!selectedMusic || (card.dataset.music || "").split("|").indexOf(selectedMusic) >= 0)
-          && (!selectedGenre || (card.dataset.genre || "").split("|").indexOf(selectedGenre) >= 0)
-          && (!fromDate || (release && release >= fromDate))
-          && (!toDate || (release && release <= toDate));
-      });
-      visible.sort(function (a, b) {
-        if (sort.value === "title-az") return (a.dataset.title || "").localeCompare(b.dataset.title || "");
-        if (sort.value === "title-za") return (b.dataset.title || "").localeCompare(a.dataset.title || "");
-        if (sort.value === "release-old") return (a.dataset.release || "").localeCompare(b.dataset.release || "");
-        if (sort.value === "release-new") return (b.dataset.release || "").localeCompare(a.dataset.release || "");
-        return Number(b.dataset.plays || 0) - Number(a.dataset.plays || 0);
-      });
-      visible.forEach(function (card, i) { card.hidden = false; var n = card.querySelector(".n"); if (n) n.textContent = String(i + 1); grid.appendChild(card); });
-      cards.filter(function (card) { return visible.indexOf(card) < 0; }).forEach(function (card) { card.hidden = true; grid.appendChild(card); });
-      if (count) count.textContent = visible.length + (visible.length === 1 ? " song" : " songs");
-      syncFilterSummaryCount("song-count", "song-filter-summary-count");
-      if (noResults) noResults.hidden = visible.length > 0;
-    }
-    [query, sort, artist, lyricist, music, genre, from, to].forEach(function (control) {
-      if (control) control.addEventListener(control.tagName === "INPUT" && control.type !== "date" ? "input" : "change", update);
-    });
-    update();
-  }
-
-  function initAdvancedSearch() {
-    var form = document.getElementById("advanced-search-form");
-    var queryEl = document.getElementById("advanced-query");
-    var typeEl = document.getElementById("advanced-type");
-    var fromEl = document.getElementById("advanced-from");
-    var toEl = document.getElementById("advanced-to");
-    var sortEl = document.getElementById("advanced-sort");
-    var resultsEl = document.getElementById("advanced-results");
-    var countEl = document.getElementById("advanced-count");
-    var emptyEl = document.getElementById("advanced-empty");
-    if (!form || !queryEl || !typeEl || !resultsEl) return;
-
-    function toResult(type, item) {
-      if (type === "song") return { type: type, item: item, title: item.title, subtitle: (item.artists || []).join(", ") + " · " + item.movieTitle + " (" + item.year + ")", path: "/song/" + encodeURIComponent(item.id) + "/", image: item.artwork || item.poster, date: item.release || item.released || "", plays: Number(item.playsNum || 0), fields: fieldsForSong(item) };
-      if (type === "movie") return { type: type, item: item, title: item.title, subtitle: item.year + " · " + (item.genres || []).slice(0, 3).join(", ") + (item.imdbId ? " · " + item.imdbId : ""), path: item.path, image: item.poster || item.artwork, date: item.released || (item.year + "-01-01"), plays: Number(item.playsNum || 0), fields: fieldsForMovie(item) };
-      return { type: type, item: item, title: item.title, subtitle: item.movieTitle + " · " + item.year + " · " + item.songs + (item.songs === 1 ? " song" : " songs"), path: item.path, image: item.artwork, date: item.release || "", plays: Number(item.plays || 0), fields: fieldsForAlbum(item) };
-    }
-    function resultCard(result) {
-      var a = makeElement("a", "advanced-result-card"); a.href = result.path;
-      if (result.image) { var img = makeElement("img", "advanced-result-art"); img.src = result.image; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; a.appendChild(img); }
-      else a.appendChild(makeElement("span", "advanced-result-art advanced-result-art-empty", result.type === "song" ? "♫" : "▣"));
-      var content = makeElement("span", "advanced-result-copy");
-      content.appendChild(makeElement("span", "advanced-result-type", result.type.toUpperCase()));
-      content.appendChild(makeElement("span", "advanced-result-title", result.title));
-      content.appendChild(makeElement("span", "advanced-result-subtitle", result.subtitle));
-      a.appendChild(content);
-      var arrow = makeElement("span", "advanced-result-arrow", "↗"); a.appendChild(arrow);
-      return a;
-    }
-    function update() {
-      if (!index) return;
-      var raw = queryEl.value.trim();
-      var query = norm(raw);
-      var tokens = raw.split(/\s+/).map(norm).filter(function (token) { return token.length > 1; });
-      var types = typeEl.value === "all" ? ["song", "album", "movie"] : [typeEl.value];
-      var items = [];
-      types.forEach(function (type) {
-        var source = type === "song" ? index.songs : type === "movie" ? index.movies : index.albums;
-        (source || []).forEach(function (item) {
-          var fields = type === "song" ? fieldsForSong(item) : type === "movie" ? fieldsForMovie(item) : fieldsForAlbum(item);
-          var normalizedFields = fields.map(norm).filter(Boolean);
-          var match = !query || normalizedFields.some(function (field) { return field.indexOf(query) >= 0; })
-            || (tokens.length > 1 && tokens.every(function (token) { return normalizedFields.some(function (field) { return field.indexOf(token) >= 0; }); }));
-          var date = type === "movie" ? (item.released || (item.year + "-01-01")) : type === "album" ? (item.release || "") : (item.release || item.released || "");
-          if (!match || (fromEl.value && (!date || date < fromEl.value)) || (toEl.value && (!date || date > toEl.value))) return;
-          var result = toResult(type, item);
-          if (query) {
-            result.score = normalizedFields[0] === query ? 0 : normalizedFields[0] && normalizedFields[0].indexOf(query) === 0 ? 1 : normalizedFields.some(function (field) { return field.indexOf(query) >= 0; }) ? 2 : 3;
-          } else result.score = 4;
-          items.push(result);
-        });
-      });
-      var ordering = sortEl.value;
-      items.sort(function (a, b) {
-        if (ordering === "title-az") return a.title.localeCompare(b.title);
-        if (ordering === "title-za") return b.title.localeCompare(a.title);
-        if (ordering === "newest") return (b.date || "").localeCompare(a.date || "");
-        if (ordering === "oldest") return (a.date || "9999").localeCompare(b.date || "9999");
-        if (ordering === "popular") return b.plays - a.plays;
-        return a.score - b.score || b.plays - a.plays || a.title.localeCompare(b.title);
-      });
-      resultsEl.textContent = "";
-      items.slice(0, 300).forEach(function (result) { resultsEl.appendChild(resultCard(result)); });
-      countEl.textContent = items.length.toLocaleString() + (items.length === 1 ? " result" : " results") + (items.length > 300 ? " · showing first 300" : "");
-      emptyEl.hidden = items.length > 0;
-    }
-    form.addEventListener("submit", function (event) { event.preventDefault(); update(); });
-    queryEl.addEventListener("input", update);
-    [typeEl, fromEl, toEl, sortEl].forEach(function (control) { control.addEventListener("change", update); });
     var params = new URLSearchParams(window.location.search);
-    if (params.get("q")) queryEl.value = params.get("q");
-    if (["song", "album", "movie", "all"].indexOf(params.get("type")) >= 0) typeEl.value = params.get("type");
-    if (params.get("q") || params.get("type")) loadIndex().then(update).catch(function () { countEl.textContent = "Search database could not load. Refresh and try again."; });
-    else countEl.textContent = "Enter a term to search the database.";
-    // Prefetch once for this page so search covers every entry, not only suggestions.
-    loadIndex().then(function () { if (queryEl.value.trim()) update(); }).catch(function () {});
+    if (controls.query && params.get("q")) controls.query.value = params.get("q");
+    void originalOrder;
+    apply();
   }
 
-  function initChartTabs() {
-    var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-chart-tab]"));
-    var panels = Array.prototype.slice.call(document.querySelectorAll("[data-chart-panel]"));
-    if (!tabs.length || !panels.length) return;
-    tabs.forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        var chosen = tab.dataset.chartTab;
-        tabs.forEach(function (item) { var active = item === tab; item.classList.toggle("is-active", active); item.setAttribute("aria-selected", active ? "true" : "false"); });
-        panels.forEach(function (panel) { var active = panel.dataset.chartPanel === chosen; panel.classList.toggle("is-active", active); panel.hidden = !active; });
+  function initCatalogues() {
+    initCatalogue({
+      grid: "song-grid", item: "li.song-catalog-item", empty: "song-empty", count: "song-count", summary: "song-filter-summary-count",
+      controls: { query: "song-query", sort: "song-sort", artist: "song-artist", lyricist: "song-lyricist", music: "song-music", lang: "song-lang", genre: "song-genre", from: "song-from", to: "song-to" },
+      match: { artist: { attr: "data-artists" }, lyricist: { attr: "data-lyricists" }, music: { attr: "data-music" }, lang: { attr: "data-lang" }, genre: { attr: "data-genre" } },
+      search: ["data-title", "data-artists", "data-lyricists", "data-movie", "data-album", "data-music"],
+      defaultSort: "plays", renumber: true, noun: ["song", "songs"]
+    });
+    initCatalogue({
+      grid: "album-grid", item: "li.album-item", empty: "album-empty", count: "album-count", summary: "album-filter-summary-count",
+      controls: { query: "album-query", sort: "album-sort", artist: "album-artist", genre: "album-genre", lang: "album-lang", from: "album-from", to: "album-to" },
+      match: { artist: { attr: "data-artist" }, genre: { attr: "data-genre" }, lang: { attr: "data-lang" } },
+      search: ["data-title", "data-artist"],
+      defaultSort: "plays", noun: ["album", "albums"]
+    });
+    initCatalogue({
+      grid: "movie-grid", item: "li.movie-item", empty: "movie-empty", count: "movie-count", summary: "movie-filter-summary-count",
+      controls: { query: "movie-query", sort: "movie-sort", lang: "movie-lang", genre: "movie-genre", music: "movie-music", director: "movie-director", universe: "movie-universe", from: "movie-from", to: "movie-to" },
+      match: { lang: { attr: "data-lang" }, genre: { attr: "data-genre" }, music: { attr: "data-music" }, director: { attr: "data-director" }, universe: { attr: "data-universe" } },
+      search: ["data-title", "data-director", "data-music"],
+      defaultSort: "imdb-votes", rankBadge: true, rankSorts: ["imdb-votes", "rating", "weighted"], noun: ["movie", "movies"]
+    });
+  }
+
+  /* --------------------------------------------------------------- charts */
+  function initCharts() {
+    var tabs = $$("[data-chart-tab]");
+    if (tabs.length) {
+      var panels = $$("[data-chart-panel]");
+      var select = function (name, updateHash) {
+        tabs.forEach(function (tab) {
+          var on = tab.getAttribute("data-chart-tab") === name;
+          tab.classList.toggle("is-active", on);
+          tab.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        panels.forEach(function (panel) {
+          var on = panel.getAttribute("data-chart-panel") === name;
+          panel.hidden = !on;
+          panel.classList.toggle("is-active", on);
+        });
+        if (updateHash && window.history.replaceState) {
+          try { window.history.replaceState(null, "", "#" + name); } catch (error) {}
+        }
+      };
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () { select(tab.getAttribute("data-chart-tab"), true); });
+      });
+      var initial = window.location.hash.replace("#", "");
+      if (tabs.some(function (t) { return t.getAttribute("data-chart-tab") === initial; })) select(initial, false);
+    }
+    var views = $$("[data-chart-view]");
+    views.forEach(function (button) {
+      button.addEventListener("click", function () {
+        var name = button.getAttribute("data-chart-view");
+        views.forEach(function (b) {
+          var on = b === button;
+          b.classList.toggle("is-active", on);
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        $$("[data-chart-list]").forEach(function (list) { list.hidden = list.getAttribute("data-chart-list") !== name; });
       });
     });
   }
 
-  function initThemeToggle() {
+  /* ---------------------------------------------------------------- theme */
+  function initTheme() {
     var button = document.getElementById("theme-toggle");
     if (!button) return;
     var root = document.documentElement;
-    var icon = button.querySelector(".theme-toggle-icon");
-    var saved = null;
-    try { saved = localStorage.getItem("vachikatelugu-theme"); } catch (error) {}
-    // Vachika opens in its dark, artwork-friendly theme unless the visitor has
-    // explicitly chosen light mode before. The theme toggle remains available.
-    if (saved === "dark" || saved === "light") root.setAttribute("data-theme", saved);
-    else root.setAttribute("data-theme", "dark");
-    function reflect() {
-      var light = root.getAttribute("data-theme") === "light";
-      button.setAttribute("aria-label", light ? "Switch to dark theme" : "Switch to light theme");
-      button.title = light ? "Switch to dark theme" : "Switch to light theme";
-      if (icon) icon.textContent = light ? "☾" : "☼";
-    }
+    var sync = function () {
+      var dark = root.getAttribute("data-theme") !== "light";
+      button.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+      button.title = dark ? "Switch to light theme" : "Switch to dark theme";
+      var meta = $('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", dark ? "#050505" : "#f3f3f1");
+    };
+    sync();
     button.addEventListener("click", function () {
       var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
       root.setAttribute("data-theme", next);
-      try { localStorage.setItem("vachikatelugu-theme", next); } catch (error) {}
-      reflect();
+      store("vachikatelugu-theme", next);
+      sync();
     });
-    reflect();
   }
 
-  initResponsiveFilterPanels();
-  applyAlbumFilters();
-  applyMovieFilters();
-  applySongFilters();
-  initAdvancedSearch();
-  initChartTabs();
-  initThemeToggle();
-
-  // Keep the docked details panel below the real (responsive) header height.
-  var siteHeader = document.querySelector(".site-header");
-  function updateSiteHeaderHeight() {
-    if (!siteHeader) return;
-    var height = Math.ceil(siteHeader.getBoundingClientRect().height);
-    if (height > 0) document.documentElement.style.setProperty("--vachika-header-height", height + "px");
-  }
-  updateSiteHeaderHeight();
-  if (siteHeader) siteHeader.addEventListener("transitionend", function (event) {
-    if (event.target === siteHeader || event.target === siteHeader.querySelector(".header-inner")) updateSiteHeaderHeight();
-  });
-
-  // Right-side Spotify-inspired details drawer. A row keeps its URL for no-JS,
-  // middle-click and open-in-new-tab behaviour; a normal click opens the drawer.
-  var drawer = document.getElementById("song-drawer");
-  var drawerBackdrop = document.getElementById("song-drawer-backdrop");
-  var drawerClose = document.getElementById("drawer-close");
-  var drawerArtwork = document.getElementById("drawer-artwork");
-  var drawerTitle = document.getElementById("drawer-title");
-  var drawerFilm = document.getElementById("drawer-film");
-  var drawerAlbumLink = document.getElementById("drawer-album-link");
-  var drawerArtists = document.getElementById("drawer-artists");
-  var drawerFacts = document.getElementById("drawer-facts");
-  var drawerActions = document.getElementById("drawer-actions");
-  var drawerPlayerArea = document.getElementById("drawer-player-area");
-  var drawerFullDetails = document.getElementById("drawer-full-details");
-  var previousFocus = null;
-
-  function appendDrawerFact(label, value) {
-    if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return;
-    var item = makeElement("div", "drawer-fact");
-    item.appendChild(makeElement("span", "drawer-fact-label", label));
-    item.appendChild(makeElement("span", "drawer-fact-value", Array.isArray(value) ? value.join(", ") : String(value)));
-    drawerFacts.appendChild(item);
-  }
-
-  function makeProviderIcon(provider) {
-    var ns = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("class", "provider-icon " + (provider === "spotify" ? "spotify-icon" : "youtube-icon"));
-    svg.setAttribute("aria-hidden", "true");
-    var circle = document.createElementNS(ns, "circle"); circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "11"); circle.setAttribute("fill", "currentColor"); svg.appendChild(circle);
-    if (provider === "spotify") {
-      var path = document.createElementNS(ns, "path"); path.setAttribute("d", "M5.3 9.2c4.3-1.2 9.4-.7 13.2 1.5M6.2 12.4c3.6-1 7.7-.5 10.8 1.3M7.1 15.3c2.8-.7 5.9-.3 8.2 1");
-      path.setAttribute("fill", "none"); path.setAttribute("stroke", "var(--spotify-contrast,#10110f)"); path.setAttribute("stroke-width", "1.45"); path.setAttribute("stroke-linecap", "round"); svg.appendChild(path);
-    } else {
-      var tri = document.createElementNS(ns, "path"); tri.setAttribute("d", "M10 7.8 17 12l-7 4.2z"); tri.setAttribute("fill", "var(--youtube-contrast,#fff)"); svg.appendChild(tri);
-    }
-    return svg;
-  }
-
-  function appendDrawerLink(label, url, primary, provider) {
-    if (!url) return;
-    var anchor = makeElement("a", "btn provider-btn " + (provider === "spotify" ? "spotify-btn" : "youtube-btn") + (primary ? " primary" : ""));
-    anchor.href = url;
-    anchor.target = "_blank";
-    anchor.rel = "noopener noreferrer";
-    if (provider) anchor.appendChild(makeProviderIcon(provider));
-    anchor.appendChild(makeElement("span", "provider-label", label));
-    drawerActions.appendChild(anchor);
-  }
-
-  function openSongDrawer(song) {
-    if (!drawer || !song) return;
-    previousFocus = document.activeElement;
-    drawerArtwork.hidden = !song.artwork;
-    if (song.artwork) {
-      drawerArtwork.src = song.artwork;
-      drawerArtwork.alt = "Artwork for " + song.movieTitle + " soundtrack";
-    } else {
-      drawerArtwork.removeAttribute("src");
-      drawerArtwork.alt = "";
-    }
-    drawerTitle.textContent = song.title || "Song details";
-    drawerFilm.textContent = "From " + song.movieTitle + " (" + song.year + ")";
-    // Keep the film title linked without constructing HTML from the data.
-    var filmLink = makeElement("a", "drawer-film-link", song.movieTitle + " · " + song.year);
-    filmLink.href = song.moviePath || ("/movie/" + encodeURIComponent(song.movieSlug) + "/");
-    drawerFilm.textContent = "";
-    drawerFilm.appendChild(document.createTextNode("From "));
-    drawerFilm.appendChild(filmLink);
-    if (drawerAlbumLink) {
-      drawerAlbumLink.href = song.albumPath || ("/album/" + encodeURIComponent(song.movieSlug) + "/");
-    }
-    drawerArtists.textContent = (song.artists || []).join(", ");
-    drawerArtists.hidden = !(song.artists || []).length;
-    drawerFacts.textContent = "";
-    appendDrawerFact("Music", (song.musicDirectors || []).join(", "));
-    appendDrawerFact("Lyricist" + ((song.lyricists || []).length === 1 ? "" : "s"), song.lyricists || []);
-    appendDrawerFact("Duration", song.duration);
-    appendDrawerFact("Track", song.number && song.songCount ? song.number + " of " + song.songCount : "");
-    appendDrawerFact("YouTube Music", song.plays);
-    appendDrawerFact("Genre", song.genres || []);
-    appendDrawerFact("Song style", song.songFlavor || "");
-    drawerActions.textContent = "";
-    appendDrawerLink("Open on Spotify", song.spotifyUrl, Boolean(song.spotifyUrl), "spotify");
-    appendDrawerLink("Open on YouTube Music", song.ytmUrl, !song.spotifyUrl && Boolean(song.ytmUrl), "youtube");
-    appendDrawerLink("Watch on YouTube", song.youtubeVideoUrl, !song.spotifyUrl && !song.ytmUrl && Boolean(song.youtubeVideoUrl), "youtube");
-    drawerPlayerArea.textContent = "";
-    if (song.spotifyId || song.ytmId) {
-      var playButton = makeElement("button", "btn drawer-play-here", "Play here");
-      playButton.type = "button";
-      playButton.dataset.drawerPlay = song.spotifyId ? "spotify" : "youtube";
-      playButton.dataset.id = song.spotifyId || song.ytmId;
-      drawerActions.appendChild(playButton);
-    }
-    drawerFullDetails.href = "/song/" + encodeURIComponent(song.id) + "/";
-    var dockedPanel = window.matchMedia && window.matchMedia("(min-width: 1051px)").matches;
-    drawer.setAttribute("aria-modal", dockedPanel ? "false" : "true");
-    drawer.classList.toggle("is-docked", Boolean(dockedPanel));
-    drawer.classList.add("is-open");
-    drawer.setAttribute("aria-hidden", "false");
-    drawerBackdrop.hidden = Boolean(dockedPanel);
-    document.body.classList.add("drawer-is-open");
-    updateSiteHeaderHeight();
-    window.setTimeout(updateSiteHeaderHeight, 280);
-    window.setTimeout(function () { drawerClose && drawerClose.focus(); }, 0);
-  }
-
-  function closeSongDrawer() {
-    if (!drawer || !drawer.classList.contains("is-open")) return;
-    drawer.classList.remove("is-open", "is-docked");
-    drawer.setAttribute("aria-hidden", "true");
-    drawer.setAttribute("aria-modal", "false");
-    if (drawerBackdrop) drawerBackdrop.hidden = true;
-    document.body.classList.remove("drawer-is-open");
-    updateSiteHeaderHeight();
-    window.setTimeout(updateSiteHeaderHeight, 280);
-    if (drawerPlayerArea) drawerPlayerArea.textContent = "";
-    if (previousFocus && typeof previousFocus.focus === "function") previousFocus.focus();
-  }
-
-  function syncDrawerResponsiveMode() {
-    if (!drawer || !drawer.classList.contains("is-open")) return;
-    var dockedPanel = window.matchMedia && window.matchMedia("(min-width: 1051px)").matches;
-    drawer.classList.toggle("is-docked", Boolean(dockedPanel));
-    drawer.setAttribute("aria-modal", dockedPanel ? "false" : "true");
-    if (drawerBackdrop) drawerBackdrop.hidden = Boolean(dockedPanel);
-  }
-  if (drawerClose) drawerClose.addEventListener("click", closeSongDrawer);
-  if (drawerBackdrop) drawerBackdrop.addEventListener("click", closeSongDrawer);
-  window.addEventListener("resize", function () {
-    updateSiteHeaderHeight();
-    syncDrawerResponsiveMode();
-  });
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") {
-      setPopoverOpen(false);
-      closeSongDrawer();
-    }
-  });
-
-  document.addEventListener("click", function (event) {
-    var play = event.target.closest("[data-drawer-play]");
-    if (play) {
-      var kind = play.dataset.drawerPlay;
-      var id = play.dataset.id;
-      var frame = document.createElement("iframe");
-      frame.allow = "autoplay; encrypted-media; fullscreen; clipboard-write";
-      frame.referrerPolicy = "strict-origin-when-cross-origin";
-      frame.title = kind === "spotify" ? "Spotify player" : "YouTube Music video player";
-      if (kind === "spotify") {
-        frame.className = "spotify";
-        frame.src = "https://open.spotify.com/embed/track/" + encodeURIComponent(id) + "?utm_source=generator";
-      } else {
-        frame.className = "youtube";
-        frame.src = "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(id) + "?autoplay=1&rel=0";
+  /* --------------------------------------------------------------- lyrics */
+  function initLyrics(scope) {
+    $$("[data-lyrics]", scope).forEach(function (section) {
+      var toggle = $("[data-lyrics-toggle]", section);
+      var panel = $(".lyrics-panel", section);
+      var times = $("[data-lyrics-times]", section);
+      if (toggle) {
+        var label = $("[data-label]", toggle);
+        var apply = function (hidden) {
+          section.classList.toggle("is-collapsed", hidden);
+          toggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+          if (label) label.textContent = hidden ? "Show lyrics" : "Hide lyrics";
+        };
+        apply(store("vachikatelugu-lyrics") === "hidden");
+        toggle.addEventListener("click", function () {
+          var hide = !section.classList.contains("is-collapsed");
+          apply(hide);
+          store("vachikatelugu-lyrics", hide ? "hidden" : "shown");
+        });
       }
-      drawerPlayerArea.textContent = "";
-      drawerPlayerArea.appendChild(frame);
+      if (times && panel) {
+        var applyTimes = function (on) {
+          panel.classList.toggle("show-times", on);
+          times.setAttribute("aria-pressed", on ? "true" : "false");
+          times.classList.toggle("is-active", on);
+        };
+        applyTimes(store("vachikatelugu-times") === "on");
+        times.addEventListener("click", function () {
+          var on = !panel.classList.contains("show-times");
+          applyTimes(on);
+          store("vachikatelugu-times", on ? "on" : "off");
+        });
+      }
+    });
+  }
+
+  /* ------------------------------------------------ embeds and copy link */
+  function embedSrc(kind, id) {
+    if (!/^[A-Za-z0-9_-]{4,40}$/.test(id || "")) return "";
+    if (kind === "spotify") return "https://open.spotify.com/embed/track/" + id + "?utm_source=generator&theme=0";
+    return "https://www.youtube-nocookie.com/embed/" + id + "?autoplay=1&rel=0";
+  }
+  function makeFrame(kind, id, title) {
+    var src = embedSrc(kind, id);
+    if (!src) return null;
+    var frame = document.createElement("iframe");
+    frame.className = kind === "spotify" ? "spotify" : "youtube";
+    frame.src = src;
+    frame.title = title || "Player";
+    frame.loading = "lazy";
+    frame.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
+    frame.setAttribute("allowfullscreen", "");
+    return frame;
+  }
+  function flashCopied(button) {
+    var span = $("span", button);
+    var original = span ? span.textContent : "";
+    button.classList.add("is-copied");
+    if (span) span.textContent = "Copied";
+    setTimeout(function () { button.classList.remove("is-copied"); if (span) span.textContent = original; }, 1600);
+  }
+  function copyText(text, button) {
+    var done = function () { flashCopied(button); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+    } else { fallbackCopy(text); done(); }
+  }
+  function fallbackCopy(text) {
+    var area = document.createElement("textarea");
+    area.value = text; area.setAttribute("readonly", ""); area.style.position = "fixed"; area.style.opacity = "0";
+    document.body.appendChild(area); area.select();
+    try { document.execCommand("copy"); } catch (error) {}
+    document.body.removeChild(area);
+  }
+
+  function initActions() {
+    document.addEventListener("click", function (event) {
+      var embed = event.target.closest && event.target.closest("[data-embed]");
+      if (embed) {
+        var kind = embed.getAttribute("data-embed");
+        var frame = makeFrame(kind, embed.getAttribute("data-id"), embed.getAttribute("aria-label") || "Player");
+        if (!frame) return;
+        if (embed.closest(".trailer")) {
+          var host = embed.closest(".trailer");
+          host.innerHTML = "";
+          host.appendChild(frame);
+        } else {
+          var slot = embed.closest(".dr-actions") ? $(".dr-player", embed.closest(".drawer-body, #drawer-body")) : null;
+          if (!slot) {
+            var after = embed.closest(".actions");
+            slot = after && after.nextElementSibling && after.nextElementSibling.classList.contains("player-embed") ? after.nextElementSibling : null;
+            if (!slot && after) {
+              slot = document.createElement("div");
+              slot.className = "player-embed";
+              after.parentNode.insertBefore(slot, after.nextSibling);
+            }
+          }
+          if (slot) {
+            slot.innerHTML = "";
+            slot.appendChild(frame);
+            embed.hidden = true;
+          }
+        }
+        return;
+      }
+      var copy = event.target.closest && event.target.closest("[data-copy-link]");
+      if (copy) {
+        copyText(copy.getAttribute("data-copy-link") || window.location.href.split("#")[0], copy);
+      }
+    });
+  }
+
+  /* --------------------------------------------------------------- drawer */
+  function initDrawer(getIndex) {
+    var drawer = document.getElementById("song-drawer");
+    var body = document.getElementById("drawer-body");
+    var closeBtn = document.getElementById("drawer-close");
+    if (!drawer || !body || !closeBtn) return;
+    if (document.body.getAttribute("data-page") === "song") return;
+    var media = window.matchMedia(DRAWER_QUERY);
+    var scroller = $(".drawer-scroll", drawer);
+    var lastFocus = null;
+    var currentId = null;
+    var token = 0;
+    var lyricsCache = {};
+
+    function isOpen() { return drawer.classList.contains("is-open"); }
+
+    function markRows() {
+      $$('a[aria-current="true"][data-drawer-row]').forEach(function (a) { a.removeAttribute("aria-current"); a.removeAttribute("data-drawer-row"); });
+      if (!currentId) return;
+      $$('.tracks a[href="/song/' + currentId + '/"]').forEach(function (a) {
+        a.setAttribute("aria-current", "true");
+        a.setAttribute("data-drawer-row", "");
+      });
+    }
+
+    function listenLinks(s) {
+      var links = [];
+      if (s.spotifyUrl) links.push('<a class="listen-link spotify" href="' + esc(safeUrl(s.spotifyUrl)) + '" target="_blank" rel="noopener noreferrer">' + providerIcon("spotify") + '<span class="ll-copy"><strong>Spotify</strong><small>Open the track</small></span>' + icon("arrow").replace('class="icon"', 'class="icon ll-arrow"') + "</a>");
+      if (s.ytmUrl) links.push('<a class="listen-link ytmusic" href="' + esc(safeUrl(s.ytmUrl)) + '" target="_blank" rel="noopener noreferrer">' + providerIcon("ytmusic") + '<span class="ll-copy"><strong>YouTube Music</strong><small>' + esc(s.ytmPlays || "Open the track") + "</small></span>" + icon("arrow").replace('class="icon"', 'class="icon ll-arrow"') + "</a>");
+      if (s.youtubeVideoUrl) links.push('<a class="listen-link youtube" href="' + esc(safeUrl(s.youtubeVideoUrl)) + '" target="_blank" rel="noopener noreferrer">' + providerIcon("youtube") + '<span class="ll-copy"><strong>YouTube</strong><small>' + esc(s.youtubeVideoViews ? s.youtubeVideoViews + " views" : "Watch the video") + "</small></span>" + icon("arrow").replace('class="icon"', 'class="icon ll-arrow"') + "</a>");
+      return links.length ? '<div class="listen-links">' + links.join("") + "</div>" : "";
+    }
+
+    function factRows(s) {
+      var rows = [];
+      var add = function (label, html) { if (html) rows.push("<dt>" + esc(label) + "</dt><dd>" + html + "</dd>"); };
+      add((s.lyricists || []).length === 1 ? "Lyricist" : "Lyricists", personLinks(s.lyricists));
+      add("Music", personLinks(s.musicDirectors));
+      add("Film", '<a href="' + esc(s.moviePath) + '">' + esc(s.movieTitle) + "</a> (" + esc(s.year) + ")");
+      add("Album", s.albumPath ? '<a href="' + esc(s.albumPath) + '">' + esc(s.albumTitle) + "</a>" : "");
+      if (s.albumRelease) {
+        var d = new Date(s.albumRelease + "T00:00:00");
+        add("Album release", isNaN(d) ? esc(s.albumRelease) : esc(d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })));
+      }
+      add("Film language", esc(s.language));
+      add("Duration", esc(s.duration));
+      if (s.number != null && s.songCount) add("Track", esc(s.number + " of " + s.songCount));
+      if (s.discNumber && s.discNumber !== 1) add("Disc", esc(s.discNumber));
+      add((s.genres || []).length === 1 ? "Genre" : "Genres", esc((s.genres || []).join(", ")));
+      add("ISRC", esc(s.isrc));
+      return rows.length ? '<dl class="facts">' + rows.join("") + "</dl>" : "";
+    }
+
+    function render(s) {
+      var canPlay = s.spotifyId || s.ytmId;
+      var flags = (s.explicit ? ' <span class="flag">Explicit</span>' : "") + (s.instrumental ? ' <span class="flag">Instrumental</span>' : "");
+      var art = s.artwork || s.poster;
+      var html = "";
+      html += art ? '<img class="dr-art" src="' + esc(art) + '" alt="" width="640" height="640" referrerpolicy="no-referrer" decoding="async">' : "";
+      html += '<h2 class="dr-title">' + esc(s.title) + "</h2>";
+      html += '<p class="dr-film">From <a href="' + esc(s.moviePath) + '">' + esc(s.movieTitle) + "</a> · " + esc(s.year) + flags + "</p>";
+      if ((s.artists || []).length) html += '<p class="dr-singers">' + personLinks(s.artists) + "</p>";
+      html += listenLinks(s);
+      html += '<div class="dr-actions">';
+      if (canPlay) html += '<button type="button" class="btn" data-embed="' + (s.spotifyId ? "spotify" : "youtube") + '" data-id="' + esc(s.spotifyId || s.ytmId) + '">' + icon("play") + "<span>Play here</span></button>";
+      html += '<button type="button" class="btn" data-copy-link="' + esc(window.location.origin + "/song/" + s.id + "/") + '">' + icon("link") + "<span>Copy link</span></button></div>";
+      html += '<div class="dr-player"></div>';
+      var facts = factRows(s);
+      if (facts) html += '<div class="dr-facts">' + facts + "</div>";
+      if (s.hasLyrics) {
+        html += '<div class="dr-lyrics" data-lyrics><div class="dr-lyrics-head"><h3>Lyrics</h3><button type="button" class="chip-button" data-lyrics-toggle aria-expanded="true"><span data-label>Hide lyrics</span>' + icon("chevron") + "</button></div>" +
+          '<div class="lyrics-panel" aria-live="polite"><p class="dr-note">Loading lyrics…</p></div></div>';
+      }
+      html += '<div class="dr-footer"><a class="btn primary" href="/song/' + esc(s.id) + '/">Open the full song page ' + icon("arrow") + "</a></div>";
+      body.innerHTML = html;
+      initLyrics(body);
+      // the drawer reuses the lyrics preference but keeps the panel visible by default on first open
+      if (s.hasLyrics) loadLyrics(s);
+    }
+
+    function loadLyrics(s) {
+      var panel = $(".lyrics-panel", body);
+      if (!panel) return;
+      var mine = token;
+      var show = function (markup) {
+        if (mine !== token) return;
+        panel.innerHTML = markup;
+      };
+      if (lyricsCache[s.id]) { show(lyricsCache[s.id]); return; }
+      fetch("/song/" + s.id + "/", { credentials: "same-origin" })
+        .then(function (response) { if (!response.ok) throw new Error("page " + response.status); return response.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, "text/html");
+          var source = doc.querySelector("#lyrics-panel");
+          if (!source) throw new Error("no lyrics");
+          lyricsCache[s.id] = source.innerHTML;
+          show(lyricsCache[s.id]);
+        })
+        .catch(function () { show('<p class="dr-note">Lyrics could not be loaded. <a href="/song/' + esc(s.id) + '/">Open the song page</a>.</p>'); });
+    }
+
+    function open(id, opener) {
+      token += 1;
+      var mine = token;
+      return getIndex().then(function (index) {
+        if (mine !== token) return;
+        var song = index.songs[id];
+        if (!song) { window.location.href = "/song/" + id + "/"; return; }
+        if (!isOpen()) lastFocus = opener || document.activeElement;
+        currentId = id;
+        render(song);
+        drawer.removeAttribute("inert");
+        drawer.setAttribute("aria-hidden", "false");
+        drawer.classList.add("is-open");
+        document.body.classList.add("drawer-open");
+        if (scroller) scroller.scrollTop = 0;
+        markRows();
+        closeBtn.focus({ preventScroll: true });
+      }).catch(function () { window.location.href = "/song/" + id + "/"; });
+    }
+
+    function close(restoreFocus) {
+      if (!isOpen()) return;
+      token += 1;
+      drawer.classList.remove("is-open");
+      drawer.setAttribute("aria-hidden", "true");
+      drawer.setAttribute("inert", "");
+      document.body.classList.remove("drawer-open");
+      currentId = null;
+      markRows();
+      if (restoreFocus !== false && lastFocus && document.contains(lastFocus) && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+      lastFocus = null;
+    }
+
+    document.addEventListener("click", function (event) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!media.matches) return;
+      var link = event.target.closest && event.target.closest("a[href]");
+      if (!link || drawer.contains(link) || link.target === "_blank") return;
+      var match = /^\/song\/([A-Za-z0-9_-]+)\/?$/.exec(link.getAttribute("href") || "");
+      if (!match) return;
+      event.preventDefault();
+      if (isOpen() && currentId === match[1]) return;
+      open(match[1], link);
+    });
+    closeBtn.addEventListener("click", function () { close(true); });
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape" || !isOpen() || event.vkHandled) return;
+      close(true);
+    });
+    var onChange = function () { if (!media.matches) close(false); };
+    if (media.addEventListener) media.addEventListener("change", onChange); else if (media.addListener) media.addListener(onChange);
+  }
+
+  /* ------------------------------------------------- reveal and 3D motion */
+  function initReveal() {
+    var targets = $$("[data-reveal]");
+    targets.forEach(function (section) {
+      $$(".tracks > li, .albums-grid > li, .rail-item", section).forEach(function (el, i) { el.style.setProperty("--n", Math.min(i, 12)); });
+    });
+    if (!targets.length) return;
+    if (!("IntersectionObserver" in window) || reducedMotion) {
+      targets.forEach(function (el) { el.classList.add("is-visible"); });
       return;
     }
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-visible");
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    targets.forEach(function (el) { observer.observe(el); });
+  }
 
-    var anchor = event.target.closest("a[href]");
-    if (!anchor || !drawer || anchor.closest("#song-drawer") || anchor.hasAttribute("data-full-song-link")) return;
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    var targetUrl;
-    try { targetUrl = new URL(anchor.href, window.location.href); } catch (error) { return; }
-    if (targetUrl.origin !== window.location.origin) return;
-    var match = targetUrl.pathname.match(/^\/song\/([^/]+)\/?$/);
-    if (!match) return;
-    var songId;
-    try { songId = decodeURIComponent(match[1]); } catch (error) { songId = match[1]; }
-    event.preventDefault();
-    setPopoverOpen(false);
-    loadIndex().then(function () {
-      var song = index.songs.find(function (item) { return item.id === songId; });
-      if (song) openSongDrawer(song);
-      else window.location.href = anchor.href;
-    }).catch(function () { window.location.href = anchor.href; });
-  });
+  function initStage() {
+    var hero = document.getElementById("hero");
+    var stage = document.getElementById("stage");
+    if (!hero || !stage || reducedMotion) return;
+    if (!window.matchMedia("(hover: hover)").matches) return;
+    var frame = 0;
+    hero.addEventListener("pointermove", function (event) {
+      if (frame) return;
+      frame = requestAnimationFrame(function () {
+        frame = 0;
+        var box = hero.getBoundingClientRect();
+        var x = (event.clientX - box.left) / box.width - 0.5;
+        var y = (event.clientY - box.top) / box.height - 0.5;
+        stage.style.setProperty("--ry", (-24 + x * 22).toFixed(2) + "deg");
+        stage.style.setProperty("--rx", (10 - y * 16).toFixed(2) + "deg");
+      });
+    });
+    hero.addEventListener("pointerleave", function () {
+      stage.style.removeProperty("--ry");
+      stage.style.removeProperty("--rx");
+    });
+  }
 
-  // Existing click-to-load player for the dedicated full song and movie pages.
-  document.addEventListener("click", function (event) {
-    var btn = event.target.closest("[data-embed]");
-    if (!btn) return;
-    var kind = btn.getAttribute("data-embed");
-    var id = btn.getAttribute("data-id");
-    var frame = document.createElement("iframe");
-    frame.setAttribute("allow", "autoplay; encrypted-media; fullscreen; clipboard-write");
-    frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
-    if (kind === "spotify") {
-      frame.className = "spotify";
-      frame.title = "Spotify player";
-      frame.src = "https://open.spotify.com/embed/track/" + encodeURIComponent(id) + "?utm_source=generator";
-    } else {
-      frame.className = "youtube";
-      frame.title = "YouTube player";
-      frame.src = "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(id) + "?autoplay=1&rel=0";
-    }
-    btn.replaceWith(frame);
-    frame.focus();
-  });
+  function initTilt() {
+    if (reducedMotion || !window.matchMedia("(hover: hover)").matches) return;
+    document.addEventListener("pointermove", function (event) {
+      var wrap = event.target.closest && event.target.closest(".poster-wrap");
+      $$(".poster-wrap.is-tilting").forEach(function (el) {
+        if (el !== wrap) { el.classList.remove("is-tilting"); el.style.transform = ""; }
+      });
+      if (!wrap) return;
+      var box = wrap.getBoundingClientRect();
+      var x = (event.clientX - box.left) / box.width - 0.5;
+      var y = (event.clientY - box.top) / box.height - 0.5;
+      wrap.classList.add("is-tilting");
+      wrap.style.transform = "rotateY(" + (x * 10).toFixed(2) + "deg) rotateX(" + (-y * 10).toFixed(2) + "deg) translateZ(8px)";
+    }, { passive: true });
+  }
 
-  // Shareable song URLs for reel descriptions.
-  document.addEventListener("click", function (event) {
-    var btn = event.target.closest("[data-copy-link]");
-    if (!btn) return;
-    var url = window.location.href.split("#")[0];
-    function done() {
-      btn.textContent = "Link copied";
-      btn.setAttribute("aria-live", "polite");
-    }
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(url).then(done).catch(function () { window.prompt("Copy this song link", url); });
-    } else {
-      window.prompt("Copy this song link", url);
-    }
-  });
+  /* ----------------------------------------------------------------- boot */
+  function boot() {
+    initTheme();
+    initActions();
+    initCharts();
+    initCatalogues();
+    initLyrics(document);
+    initReveal();
+    initStage();
+    initTilt();
+    $$("[data-search-root]").forEach(function (root) { initSearch(root, loadIndex); });
+    initDrawer(loadIndex);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();

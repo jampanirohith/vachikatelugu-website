@@ -372,6 +372,16 @@ def main() -> None:
             f"{album_count} albums, {song_count} songs; integrity and FK checks ok "
             f"({Path(db).name})."
         )
+        total_rows = [
+            row[0] for row in connection.execute(
+                "SELECT s.title FROM songs s JOIN movies m ON m.imdb_id=s.movie_id WHERE m.processing_status='processed'"
+            ) if re.fullmatch(r"\d{1,3}:\d{2}(?::\d{2})?", str(row[0] or "").strip())
+        ]
+        if total_rows:
+            print(
+                f"Data notice: {len(total_rows)} song row(s) are album 'total length' lines (for example '{total_rows[0]}'), "
+                "not songs. The build skips them; fix the ingestion parser that creates them."
+            )
         print(
             "Coverage notice: "
             f"{media_song_count}/{song_count} songs have media rows; "

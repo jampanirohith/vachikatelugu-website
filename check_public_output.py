@@ -20,17 +20,19 @@ ALLOWED_INDEX_KEYS = {
         "duration", "durationSec", "number", "discNumber", "songCount", "artwork", "poster",
         "genres", "movieGenres", "imdbId", "release", "spotifyId", "ytmId",
         "spotifyUrl", "ytmUrl", "youtubeVideoUrl", "youtubeVideoId", "youtubeVideoTitle",
-        "youtubeVideoViews",
+        "youtubeVideoViews", "language", "albumRelease", "ytmPlays", "isrc", "explicit",
+        "instrumental", "hasLyrics",
     },
     "movies": {
         "slug", "path", "albumPath", "imdbId", "title", "telugu", "year", "released",
         "genres", "musicDirectors", "directors", "cast", "plot", "certification",
         "originalLanguage", "runtimeMinutes", "ottProviders", "songs", "albums", "poster", "artwork",
         "playsNum", "albumReleased", "imdbScore", "imdbVotes", "imdbVotesNumeric",
+        "imdbWeighted", "universe",
     },
     "albums": {
         "slug", "path", "moviePath", "imdbId", "title", "movieTitle", "year", "release", "artist",
-        "musicDirectors", "genres", "artwork", "plays", "songs",
+        "musicDirectors", "genres", "artwork", "plays", "songs", "language",
     },
 }
 

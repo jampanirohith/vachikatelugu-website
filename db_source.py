@@ -70,6 +70,16 @@ REQUIRED_COLUMNS = {
 }
 
 
+# Wikipedia soundtrack tables end with a "Total length" row. The ingestion step
+# stores it as a song whose title is a runtime such as "27:08". It is not a track.
+_TOTAL_LENGTH_TITLE = re.compile(r"\d{1,3}:\d{2}(?::\d{2})?")
+
+
+def is_total_length_row(title: Any) -> bool:
+    text = _nonempty(title)
+    return bool(text and _TOTAL_LENGTH_TITLE.fullmatch(text))
+
+
 def database_path() -> Path | None:
     """Return the configured/local database path without copying or modifying it."""
     configured = os.environ.get("DATABASE_PATH")
@@ -395,8 +405,12 @@ def load_database_catalogue() -> dict[str, Any]:
         """).fetchall()
 
         songs: list[dict[str, Any]] = []
+        skipped_total_rows: list[str] = []
         for row in song_rows:
             source = dict(row)
+            if is_total_length_row(source.get("title")):
+                skipped_total_rows.append(f"{source.get('movie_id')}: {str(source.get('title')).strip()}")
+                continue
             movie = movie_by_id.get(source["movie_id"])
             album = album_by_id.get(source["album_id"])
             if movie is None or album is None:
@@ -472,12 +486,18 @@ def load_database_catalogue() -> dict[str, Any]:
             f"data source: normalized SQLite ({db.name}); schema {schema_version}; "
             f"loaded {len(movies)} movies, {len(albums)} albums, {len(songs)} songs"
         )
+        if skipped_total_rows:
+            print(
+                f"note: skipped {len(skipped_total_rows)} 'total length' row(s) that are not songs "
+                f"(e.g. {skipped_total_rows[0]})"
+            )
         return {
             "schema_version": schema_version,
             "database_name": db.name,
             "movies": movies,
             "albums": albums,
             "songs": songs,
+            "skipped_total_length_rows": skipped_total_rows,
         }
     finally:
         connection.close()

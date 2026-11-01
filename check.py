@@ -126,7 +126,7 @@ def validate_lyrics_component(problems: list[str]) -> None:
         "lrc_lyrics": "[ar:Test Artist]\n[00:01.25]First line\n[00:02.50]Second <line>\n",
         "plain_lyrics": None,
     })
-    if 'class="song-lyrics-section"' not in lrc or 'data-time="1.25"' not in lrc or 'data-time="2.50"' not in lrc:
+    if 'song-lyrics-section"' not in lrc or 'data-time="1.25"' not in lrc or 'data-time="2.50"' not in lrc:
         fail("LRC fixture did not render a lyrics section with timestamped lines", problems)
     if "Second &lt;line&gt;" not in lrc or "[ar:Test Artist]" in lrc:
         fail("LRC rendering does not safely escape lyric text or suppress LRC metadata tags", problems)
@@ -150,6 +150,10 @@ def main() -> None:
         raise SystemExit(1)
 
     validate_source_json_independence(movies, problems)
+    for movie in movies:
+        for song in movie["songs"]:
+            if re.fullmatch(r"\d{1,3}:\d{2}(?::\d{2})?", song["title"].strip()):
+                fail(f'"{song["title"]}" in {movie["title"]} is a total-length row, not a song', problems)
     songs = [song for movie in movies for song in movie["songs"]]
     albums = [album for movie in movies for album in movie["albums"]]
     expected_song_ids = {song["id"] for song in songs}
@@ -246,8 +250,10 @@ def main() -> None:
         for marker in ('id="movie-query"', 'id="movie-sort"', 'id="movie-genre"', 'id="movie-music"', 'id="movie-director"', 'class="movies-grid"'):
             if marker not in text:
                 fail(f"movies page missing expected filter/control: {marker}", problems)
-        if '<option value="imdb-votes" selected>Most IMDb votes</option>' not in text:
-            fail("movies page must default to Most IMDb votes sorting", problems)
+        if '<option value="imdb-votes" selected>Most IMDb ratings</option>' not in text:
+            fail("movies page must default to sorting by the number of IMDb ratings", problems)
+        if 'id="movie-from"' not in text or 'id="movie-lang"' not in text:
+            fail("movies page is missing its year or language filter", problems)
         ordered_movies = sorted(movies, key=lambda movie: (-int(movie.get("imdb_votes_numeric") or 0), movie["title"].casefold()))
         first_card = re.search(r'<li class="movie-item"([^>]*)>', text)
         if ordered_movies and first_card:
@@ -266,21 +272,23 @@ def main() -> None:
     home_path = DIST / "index.html"
     if home_path.is_file():
         home = home_path.read_text(encoding="utf-8")
-        for marker in ('id="home-search-form"', 'id="home-q"', 'id="album-results"', 'id="film-results"', 'id="song-results"'):
+        for marker in ('id="home-search-form"', 'id="home-q"', 'id="results"', 'id="poster-rail"', 'data-reveal', 'id="stage"', 'data-filter-toggle'):
             if marker not in home:
-                fail(f"homepage missing central search/result feature: {marker}", problems)
-        if 'src="/static/vachika-wordmark.png"' not in home:
-            fail("global header wordmark asset is missing from the homepage", problems)
-        actions_at = home.find('id="drawer-actions"')
-        album_at = home.find('id="drawer-album-link"')
-        artists_at = home.find('id="drawer-artists"')
-        if not (0 <= actions_at < album_at < artists_at):
-            fail("song drawer should place provider actions above album link and credits", problems)
+                fail(f"homepage missing expected feature: {marker}", problems)
+        for asset in ("vachika-mark-dark.png", "vachika-mark-light.png", "vachika-wordmark-dark.png", "vachika-wordmark-light.png"):
+            if f'src="/static/{asset}"' not in home:
+                fail(f"header logo asset {asset} is not referenced on the homepage", problems)
+            if not (DIST / "static" / asset).is_file():
+                fail(f"header logo asset {asset} is missing from dist/static", problems)
+        if 'id="drawer-body"' not in home or 'id="drawer-close"' not in home:
+            fail("song drawer shell is missing from the homepage", problems)
         css_path = ROOT / "static" / "style.css"
         css = css_path.read_text(encoding="utf-8") if css_path.is_file() else ""
-        for marker in ("html[data-theme=\"light\"]", "--vachika-header-height", "display: block !important", "backdrop-filter: blur(30px)"):
+        for marker in ('html[data-theme="light"]', "body.drawer-open .page-shell", "backdrop-filter: blur(", "prefers-reduced-motion"):
             if marker not in css:
-                fail(f"theme/drawer stylesheet missing expected glass/header rule: {marker}", problems)
+                fail(f"stylesheet missing expected rule: {marker}", problems)
+        if not (ROOT / "static" / "theme.js").is_file():
+            fail("static/theme.js (no-flash theme script) is missing", problems)
 
     charts_path = DIST / "charts" / "index.html"
     if charts_path.is_file():
@@ -332,7 +340,7 @@ def main() -> None:
             continue
         text = page.read_text(encoding="utf-8")
         try:
-            metadata_html = text.split('<section class="song-metadata-section"', 1)[1].split("</section>", 1)[0]
+            metadata_html = text.split('song-metadata-section">', 1)[1].split("</section>", 1)[0]
         except IndexError:
             fail(f"{page.relative_to(DIST)}: missing curated song metadata section", problems)
             continue
@@ -344,9 +352,9 @@ def main() -> None:
         should_have_lyrics = bool(song.get("lrc_lyrics") or song.get("plain_lyrics"))
         if should_have_lyrics:
             lyrics_rows_present += 1
-            if 'class="song-lyrics-section"' not in text:
-                fail(f"{page.relative_to(DIST)}: lyrics exist in SQLite but lyrics section is missing", problems)
-        elif 'class="song-lyrics-section"' in text:
+            if 'song-lyrics-section"' not in text or 'data-lyrics-toggle' not in text:
+                fail(f"{page.relative_to(DIST)}: lyrics exist in SQLite but lyrics section or its hide/show button is missing", problems)
+        elif 'song-lyrics-section"' in text:
             fail(f"{page.relative_to(DIST)}: empty lyrics section is rendered without lyrics data", problems)
         if song["id"] in expected_media_less:
             media_less_pages_checked += 1
@@ -369,8 +377,10 @@ def main() -> None:
             fail("unresolved search-index cache version placeholder in generated app.js", problems)
         if "?v=dev" in js_text or "?v=20261016-jsonmeta3" in js_text:
             fail("stale hard-coded asset cache version remains in generated app.js", problems)
-        if "song-lyricist" not in js_text or "selectedLyricist" not in js_text:
+        if "song-lyricist" not in js_text or "data-lyricists" not in js_text:
             fail("song lyricist filter is not wired into the browser filtering logic", problems)
+        if "songFlavor" in js_text:
+            fail("app.js still references the removed songFlavor field", problems)
         if "song-lyrics-section" not in css_text or "lyrics-lines" not in css_text:
             fail("lyrics styles are missing from static/style.css", problems)
 

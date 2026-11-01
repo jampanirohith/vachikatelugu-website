@@ -1,0 +1,16 @@
+{
+  "_comment": "Display-name merges applied at build time to singers, lyricists and music directors. Key = the spelling to show, value = spellings in the database that mean the same person. Add a line here when the build prints a 'possible duplicate spelling' warning.",
+  "M. M. Keeravani": ["M. M. Keeravaani", "M.M. Keeravaani", "M.M. Keeravani", "MM Keeravani"],
+  "Chandrabose": ["Chandra Bose"],
+  "Anantha Sriram": ["Ananta Sriram", "Anantha Sreeram", "Ananta Sreeram"],
+  "Chaitanya Prasad": ["Chaithanya Prasad"],
+  "Krishna Kanth": ["Krishnakanth"],
+  "Satya Yamini": ["Sathya Yamini"],
+  "L. V. Revanth": ["LV Revanth"],
+  "Chinmayi Sripaada": ["Chinmayi Sripada"],
+  "M. M. Manasi": ["M.M.Manasi", "M.M. Manasi"],
+  "Sam C. S.": ["Sam C S"],
+  "DJ Chetas": ["Dj Chetas"],
+  "Suddala Ashok Teja": ["Suddhala Ashoka Teja", "Suddala Ashoka Teja"],
+  "K. Shiva Shakti Datta": ["K Shiva Shakti Datta", "K. Shivashakthi Datta", "K. Shiva Dutta", "Siva Shakthi Datta", "Shiva Shakti Datta"]
+}
