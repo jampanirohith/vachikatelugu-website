@@ -92,7 +92,7 @@
       maxima.song = Math.max(maxima.song, pop);
       records.push({
         type: "song", raw: s, id: s.id, title: s.title, titleN: norm(s.title), pop: pop,
-        year: toInt(s.year), release: s.release || "", lang: norm(s.language),
+        year: toInt(s.year), release: s.release || "", lang: norm(s.language) || "telugu",
         genres: (s.genres || []).concat(s.movieGenres || []).map(norm),
         href: "/song/" + s.id + "/", art: s.artwork || s.poster || "",
         sub: s.movieTitle + (s.year ? " · " + s.year : "") + ((s.artists || []).length ? " · " + s.artists.slice(0, 2).join(", ") : ""),
@@ -106,7 +106,7 @@
       maxima.album = Math.max(maxima.album, pop);
       records.push({
         type: "album", raw: a, id: a.slug, title: a.title, titleN: norm(a.title), pop: pop,
-        year: toInt(a.year), release: a.release || "", lang: norm(a.language),
+        year: toInt(a.year), release: a.release || "", lang: norm(a.language) || "telugu",
         genres: (a.genres || []).map(norm),
         href: a.path, art: a.artwork || "",
         sub: a.movieTitle + (a.year ? " · " + a.year : "") + " · " + a.songs + (a.songs === 1 ? " song" : " songs"),
@@ -119,7 +119,7 @@
       maxima.movie = Math.max(maxima.movie, pop);
       records.push({
         type: "movie", raw: m, id: m.slug, title: m.title, titleN: norm(m.title), pop: pop,
-        year: toInt(m.year), release: m.released || (m.year ? m.year + "-01-01" : ""), lang: norm(m.originalLanguage),
+        year: toInt(m.year), release: m.released || (m.year ? m.year + "-01-01" : ""), lang: norm(m.originalLanguage) || "telugu",
         genres: (m.genres || []).map(norm),
         href: m.path, art: m.poster || m.artwork || "",
         sub: (m.year || "") + (m.originalLanguage ? " · " + m.originalLanguage : "") + " · " + m.songs + (m.songs === 1 ? " song" : " songs"),
@@ -696,6 +696,33 @@
           store("vachikatelugu-lyrics", hide ? "hidden" : "shown");
         });
       }
+      var sizes = [0.85, 1, 1.15, 1.3, 1.55];
+      var sizeIndex = toInt(store("vachikatelugu-lyric-size"));
+      if (sizeIndex === null || sizeIndex < 0 || sizeIndex >= sizes.length) sizeIndex = 1;
+      section.style.setProperty("--lyric-scale", sizes[sizeIndex]);
+      $$("[data-lyrics-size]", section).forEach(function (button) {
+        button.addEventListener("click", function () {
+          sizeIndex = Math.max(0, Math.min(sizes.length - 1, sizeIndex + toInt(button.getAttribute("data-lyrics-size"))));
+          section.style.setProperty("--lyric-scale", sizes[sizeIndex]);
+          store("vachikatelugu-lyric-size", String(sizeIndex));
+        });
+      });
+      var copyButton = $("[data-lyrics-copy]", section);
+      if (copyButton && panel) {
+        copyButton.addEventListener("click", function () {
+          var blocks = $$(".stanza, .lyrics-lines", panel).map(function (block) {
+            return $$(".lyrics-text", block).map(function (line) { return line.textContent.trim(); }).join("\n");
+          });
+          if (!blocks.length) blocks = [panel.innerText.trim()];
+          copyText(blocks.join("\n\n"), copyButton);
+        });
+      }
+      if (panel) {
+        panel.addEventListener("click", function (event) {
+          var line = event.target.closest && event.target.closest(".lyrics-text");
+          if (line) line.classList.toggle("is-lit");
+        });
+      }
       if (times && panel) {
         var applyTimes = function (on) {
           panel.classList.toggle("show-times", on);
@@ -944,9 +971,21 @@
 
   /* ------------------------------------------------- reveal and 3D motion */
   function initReveal() {
+    // detail pages and grids reveal the same way as the home sections
+    var auto = [".song-col-main > .card", ".song-col-side > .card", ".album-layout > *", ".movie-body > section",
+      ".movie-columns > div > *", ".movies-grid > li", ".albums-grid-large > li", ".filter-panel"];
+    auto.forEach(function (selector) {
+      $$(selector).forEach(function (el, i) {
+        if (el.hasAttribute("data-reveal")) return;
+        el.setAttribute("data-reveal", "");
+        el.style.setProperty("--n", String(i % 5));
+        var box = el.getBoundingClientRect();
+        if (box.top < window.innerHeight * 0.95 && box.bottom > 0) el.classList.add("is-visible");
+      });
+    });
     var targets = $$("[data-reveal]");
     targets.forEach(function (section) {
-      $$(".tracks > li, .albums-grid > li, .rail-item", section).forEach(function (el, i) { el.style.setProperty("--n", Math.min(i, 12)); });
+      $$(".tracks > li", section).forEach(function (el, i) { el.style.setProperty("--n", Math.min(i, 12)); });
     });
     if (!targets.length) return;
     if (!("IntersectionObserver" in window) || reducedMotion) {
@@ -959,35 +998,228 @@
         entry.target.classList.add("is-visible");
         observer.unobserve(entry.target);
       });
-    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
-    targets.forEach(function (el) { observer.observe(el); });
+    }, { threshold: 0.1, rootMargin: "0px 0px -6% 0px" });
+    targets.forEach(function (el) { if (!el.classList.contains("is-visible")) observer.observe(el); });
   }
 
+  // Hero: a draggable 3D stack of covers. Swipe, drag, scroll sideways or tap a cover.
   function initStage() {
     var hero = document.getElementById("hero");
+    var wrap = document.getElementById("hero-stage");
     var stage = document.getElementById("stage");
-    if (!hero || !stage || reducedMotion) return;
-    if (!window.matchMedia("(hover: hover)").matches) return;
+    if (!hero || !wrap || !stage) return;
+    var cards = $$(".stage-card", stage);
+    var count = cards.length;
+    if (count < 2) return;
+    var pos = 0, startX = 0, startPos = 0, pointerId = null, dragging = false, suppress = false;
+    var lastTouch = 0, visible = true, hovering = false, wheelAt = 0;
+
+    function wrapOffset(d) { return ((d + count / 2) % count + count) % count - count / 2; }
+    function paint() {
+      cards.forEach(function (card, i) {
+        var d = wrapOffset(i - pos), ad = Math.abs(d);
+        card.style.setProperty("--d", d.toFixed(3));
+        card.style.setProperty("--ad", ad.toFixed(3));
+        card.style.zIndex = String(100 - Math.round(ad * 10));
+        card.classList.toggle("is-front", ad < 0.5);
+      });
+    }
+    function step() { return Math.max(60, cards[0].offsetWidth * 0.42); }
+    function snap(delta) { pos = Math.round(pos) + (delta || 0); paint(); }
+
+    wrap.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 && event.pointerType === "mouse") return;
+      pointerId = event.pointerId; startX = event.clientX; startPos = pos; dragging = false; suppress = false;
+      lastTouch = Date.now();
+    });
+    wrap.addEventListener("pointermove", function (event) {
+      if (pointerId !== event.pointerId) return;
+      var dx = event.clientX - startX;
+      if (!dragging && Math.abs(dx) > 7) {
+        dragging = true; suppress = true;
+        wrap.classList.add("is-dragging");
+        try { wrap.setPointerCapture(event.pointerId); } catch (error) {}
+      }
+      if (dragging) { pos = startPos - dx / step(); paint(); lastTouch = Date.now(); }
+    });
+    function end(event) {
+      if (pointerId !== event.pointerId) return;
+      pointerId = null;
+      if (dragging) { dragging = false; wrap.classList.remove("is-dragging"); snap(); }
+      setTimeout(function () { suppress = false; }, 0);
+    }
+    wrap.addEventListener("pointerup", end);
+    wrap.addEventListener("pointercancel", end);
+    wrap.addEventListener("click", function (event) {
+      var card = event.target.closest && event.target.closest(".stage-card");
+      if (suppress) { event.preventDefault(); return; }
+      if (card && !card.classList.contains("is-front")) {
+        event.preventDefault();
+        var d = wrapOffset(cards.indexOf(card) - pos);
+        snap(Math.round(d));
+        lastTouch = Date.now();
+      }
+    });
+    wrap.addEventListener("wheel", function (event) {
+      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || Math.abs(event.deltaX) < 12) return;
+      event.preventDefault();
+      var now = Date.now();
+      if (now - wheelAt < 260) return;
+      wheelAt = now; lastTouch = now;
+      snap(event.deltaX > 0 ? 1 : -1);
+    }, { passive: false });
+    paint();
+
+    if (reducedMotion) return;
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function (entries) { visible = entries[0].isIntersecting; }).observe(hero);
+    }
+    wrap.addEventListener("pointerenter", function (event) { if (event.pointerType === "mouse") hovering = true; });
+    wrap.addEventListener("pointerleave", function () { hovering = false; });
+    setInterval(function () {
+      if (!visible || hovering || dragging || document.hidden || Date.now() - lastTouch < 6000) return;
+      snap(1);
+    }, 3400);
+
+    // scroll tips the stack back; the pointer tilts it (desktop)
     var frame = 0;
-    hero.addEventListener("pointermove", function (event) {
+    function onScroll() {
       if (frame) return;
       frame = requestAnimationFrame(function () {
         frame = 0;
+        var progress = Math.min(1, Math.max(0, window.scrollY / Math.max(240, hero.offsetHeight * 0.8)));
+        wrap.style.setProperty("--sp", progress.toFixed(3));
+      });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    if (window.matchMedia("(hover: hover)").matches) {
+      hero.addEventListener("pointermove", function (event) {
+        if (dragging || event.pointerType !== "mouse") return;
         var box = hero.getBoundingClientRect();
         var x = (event.clientX - box.left) / box.width - 0.5;
         var y = (event.clientY - box.top) / box.height - 0.5;
-        stage.style.setProperty("--ry", (-24 + x * 22).toFixed(2) + "deg");
-        stage.style.setProperty("--rx", (10 - y * 16).toFixed(2) + "deg");
+        stage.style.setProperty("--ry", (x * 18).toFixed(2) + "deg");
+        stage.style.setProperty("--rx", (6 - y * 12).toFixed(2) + "deg");
       });
-    });
-    hero.addEventListener("pointerleave", function () {
-      stage.style.removeProperty("--ry");
-      stage.style.removeProperty("--rx");
+      hero.addEventListener("pointerleave", function () {
+        stage.style.removeProperty("--ry");
+        stage.style.removeProperty("--rx");
+      });
+    }
+  }
+
+  // Coverflow (albums) and rail (movies): items rotate in depth as they pass the centre while scrolling.
+  function initFlow() {
+    $$("[data-flow]").forEach(function (box) {
+      var kind = box.getAttribute("data-flow");
+      var items = $$(".flow-item", box);
+      if (!items.length) return;
+      var scope = box.closest(".home-section") || document;
+      var info = $("[data-flow-info]", scope);
+      var offsets = [], active = -1, queued = false, moved = false;
+
+      function spacing() { return items.length > 1 ? Math.abs(items[1].offsetLeft - items[0].offsetLeft) || items[0].offsetWidth : items[0].offsetWidth; }
+      function update() {
+        queued = false;
+        var center = box.scrollLeft + box.clientWidth / 2, unit = spacing(), best = 0, bestDistance = 1e9;
+        items.forEach(function (item, i) {
+          var o = (item.offsetLeft + item.offsetWidth / 2 - center) / unit;
+          var clamp = kind === "cover" ? 1 : 2;
+          item.style.setProperty("--o", o.toFixed(3));
+          item.style.setProperty("--co", Math.max(-clamp, Math.min(clamp, o)).toFixed(3));
+          item.style.setProperty("--ao", Math.min(Math.abs(o), 4).toFixed(3));
+          item.style.setProperty("--z", String(Math.max(1, 100 - Math.round(Math.abs(o) * 10))));
+          if (Math.abs(o) < bestDistance) { bestDistance = Math.abs(o); best = i; }
+        });
+        if (best !== active) {
+          if (active >= 0) items[active].classList.remove("is-active");
+          active = best;
+          items[active].classList.add("is-active");
+          if (info) {
+            var item = items[active];
+            $(".flow-title", info).textContent = item.getAttribute("data-title") || "";
+            $(".flow-sub", info).textContent = item.getAttribute("data-sub") || "";
+            var open = $(".flow-open", info);
+            if (open && item.getAttribute("data-href")) open.setAttribute("href", item.getAttribute("data-href"));
+          }
+        }
+      }
+      function request() { if (!queued) { queued = true; requestAnimationFrame(update); } }
+      function centerOn(index, smooth) {
+        index = Math.max(0, Math.min(items.length - 1, index));
+        var item = items[index];
+        box.scrollTo({ left: item.offsetLeft + item.offsetWidth / 2 - box.clientWidth / 2, behavior: smooth === false || reducedMotion ? "auto" : "smooth" });
+      }
+      box.addEventListener("scroll", request, { passive: true });
+      window.addEventListener("resize", request);
+      update();
+
+      if (kind !== "cover") return;
+      // mouse dragging (touch scrolls natively)
+      var down = null;
+      box.addEventListener("pointerdown", function (event) {
+        if (event.pointerType !== "mouse" || event.button !== 0) return;
+        down = { x: event.clientX, left: box.scrollLeft }; moved = false;
+      });
+      window.addEventListener("pointermove", function (event) {
+        if (!down) return;
+        var dx = event.clientX - down.x;
+        if (!moved && Math.abs(dx) > 5) { moved = true; box.classList.add("is-dragging"); }
+        if (moved) box.scrollLeft = down.left - dx;
+      });
+      window.addEventListener("pointerup", function () {
+        if (!down) return;
+        down = null;
+        if (moved) {
+          box.classList.remove("is-dragging");
+          centerOn(active);
+          setTimeout(function () { moved = false; }, 0);
+        }
+      });
+      box.addEventListener("click", function (event) {
+        var link = event.target.closest && event.target.closest(".cf-link");
+        if (!link) return;
+        var item = link.closest(".flow-item");
+        if (moved) { event.preventDefault(); return; }
+        if (items.indexOf(item) !== active) { event.preventDefault(); centerOn(items.indexOf(item)); }
+      });
+      box.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowRight") { event.preventDefault(); centerOn(active + 1); }
+        else if (event.key === "ArrowLeft") { event.preventDefault(); centerOn(active - 1); }
+        else if (event.key === "Home") { event.preventDefault(); centerOn(0); }
+        else if (event.key === "End") { event.preventDefault(); centerOn(items.length - 1); }
+      });
+      var prev = $("[data-flow-prev]", scope), next = $("[data-flow-next]", scope);
+      if (prev) prev.addEventListener("click", function () { centerOn(active - 1); });
+      if (next) next.addEventListener("click", function () { centerOn(active + 1); });
     });
   }
 
-  function initTilt() {
-    if (reducedMotion || !window.matchMedia("(hover: hover)").matches) return;
+  // Artwork that tilts toward the pointer or finger.
+  function initArtTilt() {
+    if (reducedMotion) return;
+    $$(".song-hero .art, .album-detail-art, .movie-head .poster").forEach(function (el) {
+      el.setAttribute("data-tilt", "");
+      function aim(event) {
+        var box = el.getBoundingClientRect();
+        var x = (event.clientX - box.left) / box.width - 0.5;
+        var y = (event.clientY - box.top) / box.height - 0.5;
+        el.classList.add("is-tilting");
+        el.style.setProperty("--ty", (x * 26).toFixed(1) + "deg");
+        el.style.setProperty("--tx", (-y * 26).toFixed(1) + "deg");
+      }
+      function rest() {
+        el.classList.remove("is-tilting");
+        el.style.removeProperty("--ty");
+        el.style.removeProperty("--tx");
+      }
+      el.addEventListener("pointerdown", aim);
+      el.addEventListener("pointermove", aim);
+      el.addEventListener("pointerleave", rest);
+      el.addEventListener("pointerup", rest);
+      el.addEventListener("pointercancel", rest);
+    });
+    if (!window.matchMedia("(hover: hover)").matches) return;
     document.addEventListener("pointermove", function (event) {
       var wrap = event.target.closest && event.target.closest(".poster-wrap");
       $$(".poster-wrap.is-tilting").forEach(function (el) {
@@ -1002,6 +1234,12 @@
     }, { passive: true });
   }
 
+  // Filter panels start collapsed on small screens so the list is the first thing you see.
+  function initPanels() {
+    if (!window.matchMedia("(max-width: 900px)").matches) return;
+    $$(".filter-panel").forEach(function (panel) { panel.removeAttribute("open"); });
+  }
+
   /* ----------------------------------------------------------------- boot */
   function boot() {
     initTheme();
@@ -1009,9 +1247,11 @@
     initCharts();
     initCatalogues();
     initLyrics(document);
+    initPanels();
     initReveal();
     initStage();
-    initTilt();
+    initFlow();
+    initArtTilt();
     $$("[data-search-root]").forEach(function (root) { initSearch(root, loadIndex); });
     initDrawer(loadIndex);
   }

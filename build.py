@@ -240,6 +240,29 @@ _LANGUAGE_NAMES = {
     "ur": "Urdu", "sa": "Sanskrit", "pa": "Punjabi", "gu": "Gujarati",
 }
 
+# This is a Telugu archive. A film with no stored original language is filed under
+# Telugu in the language filters only; the page never prints that guess as a fact.
+DEFAULT_LANGUAGE = "Telugu"
+
+
+def filter_language(movie):
+    return movie.get("original_language") or DEFAULT_LANGUAGE
+
+
+def is_default_language(movie):
+    return filter_language(movie).casefold() == DEFAULT_LANGUAGE.casefold()
+
+
+def hidden_unless_default(movie):
+    return "" if is_default_language(movie) else " hidden"
+
+
+def language_select(select_id, all_label):
+    options = "".join(
+        f'<option value="{e(v.lower())}"{" selected" if v.casefold() == DEFAULT_LANGUAGE.casefold() else ""}>{e(v)}</option>'
+        for v in SEARCH_FACETS["languages"])
+    return f'<select id="{select_id}"><option value="">{all_label}</option>{options}</select>'
+
 
 def clean_ott(entries):
     """Trim provider names and fold obvious duplicates (e.g. 'X with Ads')."""
@@ -608,6 +631,13 @@ _ICONS = {
     "star": '<path d="m12 3.2 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 17.1l-5.4 2.9 1.1-6.1-4.5-4.3 6.1-.8z" fill="currentColor" stroke="none"/>',
     "link": '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/>',
     "note": '<path d="M9 18V5l11-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+    "home": '<path d="M4 11.2 12 4l8 7.2V20h-5.5v-5.5h-5V20H4z"/>',
+    "disc": '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.4"/><path d="M12 3.5a8.5 8.5 0 0 1 6 2.5"/>',
+    "film": '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 4v16M16 4v16M4 9h4M4 15h4M16 9h4M16 15h4"/>',
+    "bars": '<path d="M6 20v-7M12 20V5M18 20v-10"/>',
+    "copy": '<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 9V6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15H9"/>',
+    "prev": '<path d="m15 5-7 7 7 7"/>',
+    "next": '<path d="m9 5 7 7-7 7"/>',
 }
 
 
@@ -684,9 +714,9 @@ def song_row(song, *, rank=None, current=False, show_movie=True, show_plays=Fals
             f' class="track song-catalog-item" data-title="{e(song["title"].lower())}" '
             f'data-artists="{e("|".join(song["artists"]).lower())}" data-lyricists="{e("|".join(song["lyricists"]).lower())}" '
             f'data-music="{e("|".join(movie["music_directors"]).lower())}" data-album="{e(song["album"]["title"].lower())}" '
-            f'data-movie="{e(movie["title"].lower())}" data-lang="{e((movie["original_language"] or "").lower())}" '
+            f'data-movie="{e(movie["title"].lower())}" data-lang="{e(filter_language(movie).lower())}" '
             f'data-genre="{e("|".join(song["genres"]).lower())}" data-release="{e(movie["released"] or (movie["year"] + "-01-01"))}" '
-            f'data-year="{e(movie["year"])}" data-plays="{int(song["plays_num"])}" data-songid="{e(song["id"])}"')
+            f'data-year="{e(movie["year"])}" data-plays="{int(song["plays_num"])}" data-songid="{e(song["id"])}"{hidden_unless_default(movie)}')
     else:
         filter_attrs = ' class="track"'
     return (
@@ -850,8 +880,8 @@ def movie_links_dropdown(movie):
 # page chrome
 # --------------------------------------------------------------------------
 
-NAV = (("home", "/", "Home"), ("songs", "/songs/", "Songs"), ("albums", "/albums/", "Albums"),
-       ("movies", "/movies/", "Movies"), ("charts", "/charts/", "Charts"))
+NAV = (("home", "/", "Home", "home"), ("songs", "/songs/", "Songs", "note"), ("albums", "/albums/", "Albums", "disc"),
+       ("movies", "/movies/", "Movies", "film"), ("charts", "/charts/", "Charts", "bars"))
 
 
 def search_controls(*, options_open=False):
@@ -913,17 +943,18 @@ def layout(cfg, site_url, *, title, desc, path, body, section="", page="", og_ty
         f'<script src="/static/theme.js?v={e(ASSET_VERSION)}"></script>',
         f'<link rel="stylesheet" href="/static/style.css?v={e(ASSET_VERSION)}">',
         f'<script src="/static/app.js?v={e(ASSET_VERSION)}" defer></script>',
+        *([f'<script src="/static/intro.js?v={e(ASSET_VERSION)}" defer></script>'] if (page or section) == "home" else []),
     ]
     if jsonld:
         blob = json.dumps(jsonld, ensure_ascii=False).replace("<", "\\u003c")
         head.append(f'<script type="application/ld+json">{blob}</script>')
 
     nav_items = []
-    for key, href, label in NAV:
+    for key, href, label, glyph in NAV:
         active = key == section
         nav_items.append(
             '<a class="nav-link' + (" active" if active else "") + '" href="' + href + '"'
-            + (' aria-current="page"' if active else "") + '><span>' + label + "</span></a>")
+            + (' aria-current="page"' if active else "") + '>' + icon(glyph, "nav-icon") + '<span>' + label + "</span></a>")
     nav = "".join(nav_items)
     brand = (
         '<a class="brand" href="/" aria-label="Vāchika home">'
@@ -951,13 +982,19 @@ def layout(cfg, site_url, *, title, desc, path, body, section="", page="", og_ty
   </div>
 </header>"""
 
+    intro_markup = (
+        f'<div id="intro" class="intro" data-v="{e(ASSET_VERSION)}" aria-hidden="true">'
+        '<canvas class="intro-canvas" width="2" height="2"></canvas>'
+        '<button type="button" class="intro-skip" data-intro-skip>Skip</button></div>\n'
+    ) if (page or section) == "home" else ""
+
     return f"""<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
 {chr(10).join(head)}
 </head>
 <body data-page="{e(page or section)}">
-<div class="page-shell" id="page-shell">
+{intro_markup}<div class="page-shell" id="page-shell">
 {header}
 <main id="main">
 {body}
@@ -1017,7 +1054,7 @@ def album_card(album, *, eager=False, filterable=False):
     released = album["released"] or (movie["year"] + "-01-01")
     attrs = (f' class="album-item" data-title="{e((album["title"] + " " + movie["title"]).lower())}" data-year="{e(album_year(album))}" '
              f'data-release="{e(released)}" data-artist="{e("|".join(movie["music_directors"]).lower())}" data-plays="{int(total)}" '
-             f'data-songs="{count}" data-genre="{e("|".join(movie["genres"]).lower())}" data-lang="{e((movie["original_language"] or "").lower())}"')
+             f'data-songs="{count}" data-genre="{e("|".join(movie["genres"]).lower())}" data-lang="{e(filter_language(movie).lower())}"{hidden_unless_default(movie)}')
     plays = f'<span class="album-plays">{e(format_count(total))} plays</span>' if total else ""
     return (
         f'<li{attrs}><a class="album-card" href="{e(album_path(album))}">'
@@ -1052,9 +1089,9 @@ def movie_card(movie, *, eager=False, rank=None):
         f'<li class="movie-item" data-title="{e(movie["title"].lower())}" data-release="{e(release)}" '
         f'data-year="{e(movie["year"])}" data-genre="{e("|".join(movie["genres"]).lower())}" '
         f'data-music="{e("|".join(movie["music_directors"]).lower())}" data-director="{e("|".join(movie["directors"]).lower())}" '
-        f'data-lang="{e((movie["original_language"] or "").lower())}" data-universe="{e((movie["cinematic_universe"] or "").lower())}" '
+        f'data-lang="{e(filter_language(movie).lower())}" data-universe="{e((movie["cinematic_universe"] or "").lower())}" '
         f'data-songs="{count}" data-imdb-votes="{int(movie.get("imdb_votes_numeric") or 0)}" '
-        f'data-rating="{e(movie.get("imdb_rating_numeric") or 0)}" data-weighted="{weighted}">'
+        f'data-rating="{e(movie.get("imdb_rating_numeric") or 0)}" data-weighted="{weighted}"{hidden_unless_default(movie)}>'
         f'<a class="movie-card" href="{e(movie_path(movie))}"><span class="poster-wrap">{cover}{rank_html}{rating_pill(movie)}</span>'
         f'<span class="movie-card-title">{e(movie["title"])}</span>'
         f'<span class="sub">{e(movie["year"])}{language} · {count} {"song" if count == 1 else "songs"}</span>'
@@ -1079,7 +1116,7 @@ def movie_rail_item(movie, rank):
         bits.append(f'{icon("star")}{e(movie["imdb_score"])}')
     if votes_label(movie):
         bits.append(f'{e(votes_label(movie))} ratings')
-    return (f'<li class="rail-item" style="--i:{rank - 1}"><a href="{e(movie_path(movie))}">'
+    return (f'<li class="rail-item flow-item" style="--i:{rank - 1}"><a href="{e(movie_path(movie))}">'
             f'<span class="rail-rank" aria-hidden="true">{rank}</span><span class="rail-art">{cover}</span>'
             f'<span class="rail-title">{e(movie["title"])}</span>'
             f'<span class="rail-meta">{" <i>·</i> ".join(bits)}</span></a></li>')
@@ -1142,17 +1179,38 @@ def filter_panel(panel_id, summary_id, count_text, inner):
 # pages
 # --------------------------------------------------------------------------
 
+def coverflow_item(album, index):
+    movie = album["movie"]
+    art = album_art(album, movie)
+    count = len(album["songs"])
+    total = album_total_plays(album)
+    sub = f'{movie["title"]} · {movie["year"]} · {count} {"song" if count == 1 else "songs"}'
+    plays = f' · {format_count(total)} plays' if total else ""
+    eager = index < 3
+    return (
+        f'<li class="flow-item" data-title="{e(album["title"])}" data-sub="{e(sub + plays)}" data-href="{e(album_path(album))}">'
+        f'<a class="cf-link" href="{e(album_path(album))}"><span class="cf-art">'
+        f'{img(art, "Album artwork for " + album["title"], "cf-img", 640, 640, eager=eager)}</span>'
+        f'<span class="flow-cap"><strong>{e(album["title"])}</strong><small>{e(sub)}</small></span></a></li>')
+
+
 def home_page(cfg, site_url, movies):
     all_songs = [s for m in movies for s in m["songs"]]
     all_albums = [album for movie in movies for album in movie["albums"]]
     top_songs = sorted(all_songs, key=lambda s: s["plays_num"], reverse=True)[:6]
-    popular_albums = sorted(all_albums, key=album_total_plays, reverse=True)[:6]
     top_rows = "".join(song_row(song, rank=i + 1, show_plays=True) for i, song in enumerate(top_songs))
     rail = "".join(movie_rail_item(m, i + 1) for i, m in enumerate(votes_ranked(movies)[:10]))
-    album_items = "".join(album_card(a, eager=False) for a in popular_albums)
-    stage_albums = [a for a in sorted(all_albums, key=album_total_plays, reverse=True) if a.get("artwork")][:5]
+    ranked_albums = sorted(all_albums, key=album_total_plays, reverse=True)
+    flow_items = "".join(coverflow_item(a, i) for i, a in enumerate(a for a in ranked_albums if album_art(a, a["movie"])))
+    stage_albums = [a for a in ranked_albums if a.get("artwork")][:7]
+    stage_count = len(stage_albums)
+
+    def stage_offset(i):
+        return i if i <= stage_count // 2 else i - stage_count
+
     stage = "".join(
-        f'<a class="stage-card" style="--i:{i}" href="{e(album_path(a))}" tabindex="-1">'
+        f'<a class="stage-card" style="--d:{stage_offset(i)};--ad:{abs(stage_offset(i))}" href="{e(album_path(a))}" '
+        f'aria-label="{e(a["title"])} soundtrack">'
         f'{img(a["artwork"], "", "stage-art", 640, 640, eager=True)}</a>' for i, a in enumerate(stage_albums))
     languages = ", ".join(SEARCH_FACETS["languages"])
 
@@ -1174,7 +1232,7 @@ def home_page(cfg, site_url, movies):
     </form>
     <div class="home-stats"><span><strong>{len(all_songs)}</strong> songs</span><span><strong>{len(all_albums)}</strong> albums</span><span><strong>{len(movies)}</strong> movies</span></div>
   </div>
-  <div class="hero-stage" aria-hidden="true"><div class="stage" id="stage">{stage}</div></div>
+  <div class="hero-stage" id="hero-stage"><div class="stage" id="stage" data-stage>{stage}</div></div>
   <a class="scroll-cue" href="#browse" aria-label="Scroll to charts"><span>Scroll</span>{icon("chevron")}</a>
 </section>
 
@@ -1188,16 +1246,24 @@ def home_page(cfg, site_url, movies):
     <ol class="tracks chart-tracks">{top_rows}</ol>
   </section>
   <section class="wrap home-section reveal" data-reveal>
-    {section_heading("SOUNDTRACKS", "Popular albums", "/albums/", "All albums")}
-    <p class="section-note">Ranked by the combined plays of each soundtrack's songs.</p>
-    <ul class="albums-grid">{album_items}</ul>
+    {section_heading("SOUNDTRACKS", "Flip through the albums", "/albums/", "All albums")}
+    <p class="section-note">Drag, swipe or scroll sideways. Tap the centre cover to open it. Ordered by combined plays.</p>
+    <div class="flow-wrap">
+      <ul class="coverflow" data-flow="cover" tabindex="0" aria-label="Soundtrack albums, swipe sideways">{flow_items}</ul>
+      <button type="button" class="flow-arrow flow-prev" data-flow-prev aria-label="Previous album">{icon("prev")}</button>
+      <button type="button" class="flow-arrow flow-next" data-flow-next aria-label="Next album">{icon("next")}</button>
+    </div>
+    <div class="flow-info" data-flow-info aria-live="polite">
+      <p class="flow-title"></p><p class="flow-sub"></p>
+      <a class="btn primary flow-open" href="/albums/">Open album {icon("arrow")}</a>
+    </div>
   </section>
   <section class="home-section home-rail-section reveal" data-reveal>
     <div class="wrap">
       {section_heading("MOST RATED", "Popular movies", "/movies/", "All movies")}
       <p class="section-note">Ranked by the number of IMDb ratings each film has received.</p>
     </div>
-    <ol class="poster-rail" id="poster-rail">{rail}</ol>
+    <ol class="poster-rail" id="poster-rail" data-flow="rail">{rail}</ol>
   </section>
   <section class="wrap home-cta reveal" data-reveal>
     <p class="eyebrow">KEEP DIGGING</p>
@@ -1222,6 +1288,7 @@ def albums_page(cfg, site_url, movies):
     albums = sorted((album for movie in movies for album in movie["albums"]), key=album_total_plays, reverse=True)
     items = "".join(album_card(album, eager=i < 4, filterable=True) for i, album in enumerate(albums))
     total_plays = sum(album_total_plays(album) for album in albums)
+    shown_albums = sum(1 for album in albums if is_default_language(album["movie"]))
     artists = sorted({artist for album in albums for artist in album["movie"]["music_directors"] if artist}, key=str.casefold)
     genres = sorted({genre for album in albums for genre in album["movie"]["genres"] if genre}, key=str.casefold)
     inner = f"""<div class="filter-bar" id="album-filters" aria-label="Filter albums">
@@ -1229,14 +1296,14 @@ def albums_page(cfg, site_url, movies):
     <label>Sort by<select id="album-sort"><option value="plays">Most played</option><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
     <label>Music director<select id="album-artist"><option value="">All music directors</option>{options_html(artists)}</select></label>
     <label>Movie genre<select id="album-genre"><option value="">All genres</option>{options_html(genres)}</select></label>
-    <label>Film language<select id="album-lang"><option value="">All languages</option>{options_html(SEARCH_FACETS["languages"])}</select></label>
+    <label>Film language{language_select("album-lang", "All languages")}</label>
     {year_inputs("album", "Year")}
-    <p class="filter-count" id="album-count" aria-live="polite">{len(albums)} albums</p>
+    <p class="filter-count" id="album-count" aria-live="polite">{shown_albums} albums</p>
   </div>"""
     body = f"""
 {page_intro("SOUNDTRACK LIBRARY", "Albums", f"{len(albums)} soundtrack albums with full tracklists, credits and listening links.", f'{len(albums)} albums <span aria-hidden="true">·</span> {e(format_count(total_plays))} combined plays')}
 <section class="wrap page-section">
-  {filter_panel("album-filter-panel", "album-filter-summary-count", f"{len(albums)} albums", inner)}
+  {filter_panel("album-filter-panel", "album-filter-summary-count", f"{shown_albums} albums", inner)}
   <ul class="albums-grid albums-grid-large" id="album-grid">{items}</ul>
   <p class="empty" id="album-empty" hidden>No albums match those filters. Try a different title, music director or year range.</p>
   <p class="data-note">Plays add each song's YouTube views and YouTube Music plays at the time of the last data capture. Release sorting uses the album release date and falls back to the film's release year.</p>
@@ -1250,30 +1317,35 @@ def albums_page(cfg, site_url, movies):
 def movies_page(cfg, site_url, movies):
     # The default vote-count order is rendered into the HTML so it is right before JS loads.
     ordered = votes_ranked(movies)
-    items = "".join(movie_card(movie, eager=i < 4, rank=i + 1) for i, movie in enumerate(ordered))
+    shown_movies = sum(1 for movie in movies if is_default_language(movie))
+    ranks, running = {}, 0
+    for movie in ordered:
+        if is_default_language(movie):
+            running += 1
+            ranks[id(movie)] = running
+    items = "".join(movie_card(movie, eager=i < 4, rank=ranks.get(id(movie))) for i, movie in enumerate(ordered))
     genres = sorted({genre for movie in movies for genre in movie["genres"] if genre}, key=str.casefold)
     artists = sorted({a for movie in movies for a in movie["music_directors"] if a}, key=str.casefold)
     directors = sorted({a for movie in movies for a in movie["directors"] if a}, key=str.casefold)
     universes = sorted({m["cinematic_universe"] for m in movies if m["cinematic_universe"]}, key=str.casefold)
     total_votes = sum(int(m.get("imdb_votes_numeric") or 0) for m in movies)
-    top = ordered[0] if ordered else None
+    top = next((m for m in ordered if is_default_language(m)), ordered[0] if ordered else None)
     backdrop = img(top["backdrop"], "", "movies-hero-art", 1280, 720, eager=True) if top and top.get("backdrop") else ""
     spotlight = ""
     if top:
         spotlight = (f'<a class="spotlight" href="{e(movie_path(top))}"><span class="eyebrow">MOST RATED</span>'
                      f'<strong>{e(top["title"])}</strong><span>{e(format_count(top["imdb_votes_numeric"]))} IMDb ratings'
                      f'{(" · ★ " + e(top["imdb_score"])) if top.get("imdb_score") else ""}</span></a>')
-    language_options = options_html(SEARCH_FACETS["languages"])
     inner = f"""<div class="filter-bar movie-filter-bar" id="movie-filters" aria-label="Filter movies">
     <label class="filter-search">Find a movie<input id="movie-query" type="search" placeholder="Title, actor or director" autocomplete="off"></label>
     <label>Sort by<select id="movie-sort"><option value="imdb-votes" selected>Most IMDb ratings</option><option value="rating">Highest IMDb score</option><option value="weighted">Best rated (score + ratings)</option><option value="release-new">Newest release</option><option value="release-old">Oldest release</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option><option value="songs">Most songs</option></select></label>
-    <label>Language<select id="movie-lang"><option value="">All languages</option>{language_options}</select></label>
+    <label>Language{language_select("movie-lang", "All languages")}</label>
     <label>Genre<select id="movie-genre"><option value="">All genres</option>{options_html(genres)}</select></label>
     <label>Music director<select id="movie-music"><option value="">All music directors</option>{options_html(artists)}</select></label>
     <label>Director<select id="movie-director"><option value="">All directors</option>{options_html(directors)}</select></label>
     {('<label>Franchise<select id="movie-universe"><option value="">Any</option>' + options_html(universes) + '</select></label>') if universes else ''}
     {year_inputs("movie", "Year")}
-    <p class="filter-count" id="movie-count" aria-live="polite">{len(movies)} movies</p>
+    <p class="filter-count" id="movie-count" aria-live="polite">{shown_movies} movies</p>
   </div>"""
     body = f"""
 <section class="movies-hero">
@@ -1289,7 +1361,7 @@ def movies_page(cfg, site_url, movies):
   </div>
 </section>
 <section class="wrap page-section">
-  {filter_panel("movie-filter-panel", "movie-filter-summary-count", f"{len(movies)} movies", inner)}
+  {filter_panel("movie-filter-panel", "movie-filter-summary-count", f"{shown_movies} movies", inner)}
   <ul class="movies-grid" id="movie-grid">{items}</ul>
   <p class="empty" id="movie-empty" hidden>No movies match those filters. Try changing the title, language, genre or year range.</p>
   <p class="data-note">"Best rated" uses the IMDb weighted-rating formula: it balances a film's score against how many people rated it, so a high score from very few votes does not jump the queue.</p>
@@ -1308,22 +1380,28 @@ def songs_page(cfg, site_url, movies):
     lyricists = sorted({lyricist for song in songs for lyricist in song["lyricists"] if lyricist}, key=str.casefold)
     music_directors = sorted({artist for movie in movies for artist in movie["music_directors"] if artist}, key=str.casefold)
     genre_filter_markup = (f'<label>Track genre<select id="song-genre"><option value="">All track genres</option>{options_html(genres)}</select></label>' if genres else "")
-    rows = "".join(song_row(song, rank=i + 1, show_movie=True, show_plays=True, filterable=True) for i, song in enumerate(songs))
+    shown_songs = sum(1 for song in songs if is_default_language(song["movie"]))
+    song_ranks, running = {}, 0
+    for song in songs:
+        if is_default_language(song["movie"]):
+            running += 1
+            song_ranks[id(song)] = running
+    rows = "".join(song_row(song, rank=song_ranks.get(id(song)), show_movie=True, show_plays=True, filterable=True) for song in songs)
     inner = f"""<div class="filter-bar song-filter-bar" id="song-filters" aria-label="Filter songs">
     <label class="filter-search">Search songs<input id="song-query" type="search" placeholder="Song, film, singer or lyricist" autocomplete="off"></label>
     <label>Sort by<select id="song-sort"><option value="plays">Most played</option><option value="release-new">Newest movie</option><option value="release-old">Oldest movie</option><option value="title-az">Title A–Z</option><option value="title-za">Title Z–A</option></select></label>
     <label>Singer<select id="song-artist"><option value="">All singers</option>{options_html(artists)}</select></label>
     <label>Lyricist<select id="song-lyricist"><option value="">All lyricists</option>{options_html(lyricists)}</select></label>
     <label>Music director<select id="song-music"><option value="">All music directors</option>{options_html(music_directors)}</select></label>
-    <label>Film language<select id="song-lang"><option value="">All languages</option>{options_html(SEARCH_FACETS["languages"])}</select></label>
+    <label>Film language{language_select("song-lang", "All languages")}</label>
     {genre_filter_markup}
     {year_inputs("song", "Film year")}
-    <p class="filter-count" id="song-count" aria-live="polite">{len(songs)} songs</p>
+    <p class="filter-count" id="song-count" aria-live="polite">{shown_songs} songs</p>
   </div>"""
     body = f"""
 {page_intro("THE FULL TRACK LIBRARY", "Songs", "Every song in the archive. Open one to see its singers, lyricists, lyrics and listening links without leaving the list.", f"{len(songs)} songs across {len(movies)} movies")}
 <section class="wrap page-section">
-  {filter_panel("song-filter-panel", "song-filter-summary-count", f"{len(songs)} songs", inner)}
+  {filter_panel("song-filter-panel", "song-filter-summary-count", f"{shown_songs} songs", inner)}
   <ol class="tracks chart-tracks" id="song-grid">{rows}</ol>
   <p class="empty" id="song-empty" hidden>No songs match those filters. Try a different singer, language or year range.</p>
 </section>
@@ -1405,7 +1483,7 @@ def render_lyrics_section(song):
     has_times = False
     line_count = 0
     if lrc:
-        rendered = []
+        groups = []
         timestamp_re = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]")
         pending_gap = False
         for raw_line in lrc.splitlines():
@@ -1419,9 +1497,10 @@ def render_lyrics_section(song):
                 continue
             if not text:
                 # A timed empty line marks an instrumental gap between verses.
-                pending_gap = bool(rendered)
+                pending_gap = bool(groups)
                 continue
-            gap = " lyrics-gap" if pending_gap else ""
+            if pending_gap or not groups:
+                groups.append([])
             pending_gap = False
             if timestamps:
                 for match in timestamps:
@@ -1430,42 +1509,47 @@ def render_lyrics_section(song):
                     centiseconds = int((fraction + "00")[:2])
                     total_seconds = minutes * 60 + seconds + centiseconds / 100
                     visible_time = f"{minutes}:{seconds:02d}"
-                    rendered.append(
-                        f'<li class="lyrics-line{gap}" data-time="{total_seconds:.2f}"><time class="lyrics-timestamp">{visible_time}</time><span class="lyrics-text">{e(text)}</span></li>'
+                    groups[-1].append(
+                        f'<li class="lyrics-line" data-time="{total_seconds:.2f}"><time class="lyrics-timestamp">{visible_time}</time><span class="lyrics-text">{e(text)}</span></li>'
                     )
                     line_count += 1
-                    gap = ""
                 has_times = True
             else:
-                rendered.append(f'<li class="lyrics-line lyrics-line-untimed{gap}"><span class="lyrics-text">{e(text)}</span></li>')
+                groups[-1].append(f'<li class="lyrics-line lyrics-line-untimed"><span class="lyrics-text">{e(text)}</span></li>')
                 line_count += 1
-        if not rendered:
+        if not groups:
             # Malformed LRC should still degrade to readable text without raw timestamps.
             cleaned = timestamp_re.sub("", lrc).strip()
             source = cleaned or plain or ""
-            content = "".join(f'<p>{e(line)}</p>' for line in source.splitlines() if line.strip())
+            content = "".join(f'<p class="stanza">{e(line)}</p>' for line in source.splitlines() if line.strip())
             if not content:
                 return ""
             lyrics_markup = f'<div class="lyrics-plain">{content}</div>'
         else:
-            lyrics_markup = '<ol class="lyrics-lines">' + "".join(rendered) + "</ol>"
+            lyrics_markup = '<div class="lyrics-stanzas">' + "".join(
+                '<ol class="lyrics-lines">' + "".join(group) + "</ol>" for group in groups) + "</div>"
     else:
         stanzas = [block for block in re.split(r"\n\s*\n", (plain or "").strip()) if block.strip()]
         content = ""
         for block in stanzas:
             lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
             line_count += len(lines)
-            content += '<p class="stanza">' + "<br>".join(e(ln) for ln in lines) + "</p>"
+            content += '<p class="stanza">' + "".join(f'<span class="lyrics-text">{e(ln)}</span>' for ln in lines) + "</p>"
         if not content:
             return ""
         lyrics_markup = f'<div class="lyrics-plain">{content}</div>'
     times_button = ('<button type="button" class="chip-button" data-lyrics-times aria-pressed="false">Timestamps</button>'
                     if has_times else "")
     count_html = f'<span class="lyrics-count">{line_count} lines</span>' if line_count else ""
+    size_buttons = ('<span class="lyrics-size" role="group" aria-label="Lyrics text size">'
+                    '<button type="button" data-lyrics-size="-1" aria-label="Smaller text">A<small>\u2212</small></button>'
+                    '<button type="button" data-lyrics-size="1" aria-label="Larger text">A<small>+</small></button></span>')
+    copy_button = f'<button type="button" class="chip-button lyrics-copy" data-lyrics-copy>{icon("copy")}<span data-label>Copy</span></button>'
     return (
         '<section class="card song-lyrics-section" aria-labelledby="song-lyrics-heading" data-lyrics>'
-        '<div class="section-heading"><div><p class="eyebrow">LYRICS</p><h2 id="song-lyrics-heading">Lyrics</h2></div>'
-        f'<div class="lyrics-tools">{count_html}{times_button}'
+        '<div class="section-heading"><div><p class="eyebrow">LYRICS</p><h2 id="song-lyrics-heading">Lyrics</h2>'
+        f'{count_html}</div>'
+        f'<div class="lyrics-tools">{times_button}{size_buttons}{copy_button}'
         f'<button type="button" class="chip-button" data-lyrics-toggle aria-expanded="true" aria-controls="lyrics-panel"><span data-label>Hide lyrics</span>{icon("chevron")}</button></div></div>'
         f'<div class="lyrics-panel" id="lyrics-panel">{lyrics_markup}</div>'
         '</section>'
@@ -1842,7 +1926,7 @@ def main():
         print("warning: no site URL (set SITE_URL or site.json url); canonical links and sitemap are skipped", file=sys.stderr)
 
     movies = load_movies()
-    SEARCH_FACETS["languages"] = sorted({m["original_language"] for m in movies if m["original_language"]}, key=str.casefold)
+    SEARCH_FACETS["languages"] = sorted({filter_language(m) for m in movies}, key=str.casefold)
     SEARCH_FACETS["genres"] = sorted({g for m in movies for g in m["genres"] if g}, key=str.casefold)
     songs = [song for movie in movies for song in movie["songs"]]
     albums = [album for movie in movies for album in movie["albums"]]

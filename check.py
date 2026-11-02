@@ -254,6 +254,15 @@ def main() -> None:
             fail("movies page must default to sorting by the number of IMDb ratings", problems)
         if 'id="movie-from"' not in text or 'id="movie-lang"' not in text:
             fail("movies page is missing its year or language filter", problems)
+        if '<option value="telugu" selected>Telugu</option>' not in text:
+            fail("movies page must select Telugu in the language filter by default", problems)
+        for movie in movies:
+            lang = (movie.get("original_language") or "Telugu").casefold()
+            if lang != "telugu" and f'data-lang="{lang}"' not in text:
+                fail(f"movies page lost the language value {lang!r}; non-Telugu films must keep their own language", problems)
+        expected_shown = sum(1 for movie in movies if (movie.get("original_language") or "Telugu").casefold() == "telugu")
+        if f'id="movie-count" aria-live="polite">{expected_shown} movie' not in text:
+            fail("movies page count must match the films shown under the default Telugu filter", problems)
         ordered_movies = sorted(movies, key=lambda movie: (-int(movie.get("imdb_votes_numeric") or 0), movie["title"].casefold()))
         first_card = re.search(r'<li class="movie-item"([^>]*)>', text)
         if ordered_movies and first_card:
@@ -272,7 +281,8 @@ def main() -> None:
     home_path = DIST / "index.html"
     if home_path.is_file():
         home = home_path.read_text(encoding="utf-8")
-        for marker in ('id="home-search-form"', 'id="home-q"', 'id="results"', 'id="poster-rail"', 'data-reveal', 'id="stage"', 'data-filter-toggle'):
+        for marker in ('id="home-search-form"', 'id="home-q"', 'id="results"', 'id="poster-rail"', 'data-reveal', 'id="stage"', 'data-filter-toggle',
+                       'data-flow="cover"', 'data-flow="rail"', 'data-flow-info'):
             if marker not in home:
                 fail(f"homepage missing expected feature: {marker}", problems)
         for asset in ("vachika-mark-dark.png", "vachika-mark-light.png", "vachika-wordmark-dark.png", "vachika-wordmark-light.png"):
@@ -282,6 +292,17 @@ def main() -> None:
                 fail(f"header logo asset {asset} is missing from dist/static", problems)
         if 'id="drawer-body"' not in home or 'id="drawer-close"' not in home:
             fail("song drawer shell is missing from the homepage", problems)
+        if 'id="intro"' not in home or 'src="/static/intro.js' not in home:
+            fail("homepage is missing the entry intro overlay or its script", problems)
+        for asset in ("stroke", "stroke-order", "dot", "bar-0", "bar-1", "bar-2", "bar-3", "bar-4"):
+            if not (DIST / "static" / "intro" / f"{asset}.png").is_file():
+                fail(f"entry intro asset static/intro/{asset}.png is missing from the build", problems)
+        other = DIST / "songs" / "index.html"
+        if other.is_file() and 'id="intro"' in other.read_text(encoding="utf-8"):
+            fail("the entry intro must only be on the homepage", problems)
+        theme_js = (DIST / "static" / "theme.js").read_text(encoding="utf-8")
+        if "intro-on" not in theme_js or "prefers-reduced-motion" not in theme_js:
+            fail("theme.js must gate the intro (session, reduced motion)", problems)
         css_path = ROOT / "static" / "style.css"
         css = css_path.read_text(encoding="utf-8") if css_path.is_file() else ""
         for marker in ('html[data-theme="light"]', "body.drawer-open .page-shell", "backdrop-filter: blur(", "prefers-reduced-motion"):
@@ -352,6 +373,8 @@ def main() -> None:
         should_have_lyrics = bool(song.get("lrc_lyrics") or song.get("plain_lyrics"))
         if should_have_lyrics:
             lyrics_rows_present += 1
+            if not all(marker in text for marker in ("data-lyrics-size", "data-lyrics-copy")):
+                fail(f"{page.relative_to(DIST)}: lyrics text-size or copy control is missing", problems)
             if 'song-lyrics-section"' not in text or 'data-lyrics-toggle' not in text:
                 fail(f"{page.relative_to(DIST)}: lyrics exist in SQLite but lyrics section or its hide/show button is missing", problems)
         elif 'song-lyrics-section"' in text:

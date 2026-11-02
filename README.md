@@ -38,13 +38,16 @@ Cloudflare Pages settings: framework preset none, output directory `dist`, produ
 
 ## What the site does
 
-- **Theme.** Neutral obsidian-black glass in dark mode and a matching warm-white light mode, one orange accent, no blue. The saved choice is applied by `static/theme.js` before first paint.
-- **Header.** Logo mark plus the Vāchika wordmark (`static/vachika-*-dark.png` / `-light.png`, swapped with the theme). The search bar carries the type chips and the advanced filters (year range, language, genre, sort) in a popover; Enter or "See all results" opens `/advanced-search/` with the same state in the URL.
+- **Theme.** True-black obsidian glass in dark mode (black glass surfaces with a thin specular edge, no white tint) and a matching warm-white light mode, one orange accent, no blue. The saved choice is applied by `static/theme.js` before first paint.
+- **Entry intro.** On the home page, once per browser session, the logo sign draws itself on pure black (orange dot, pen stroke, waveform bars), then dissolves into the site. It is a canvas animation driven by the PNG layers in `static/intro/` (from the Reel opening project). Click, tap, Enter, Space or Escape skips it. It is not played for reduced-motion users, deep links with a `#`, or other pages; add `?intro` to the home URL to replay it. If the script cannot start, a CSS fallback removes the overlay after 7 seconds.
+- **Language filter.** Original language comes from `movies.original_language` (codes such as `te`, `hi`, `kn`, shown as names). The movies, songs and albums lists open filtered to Telugu; choose "All languages" for everything. A film with no stored language counts as Telugu in the filters only and no language is printed for it; films in another language are never treated as Telugu. Global search is unfiltered.
+- **Header.** Logo mark plus the Vāchika wordmark (`static/vachika-*-dark.png` / `-light.png`, swapped with the theme). On phones the header is one row (mark, search, theme) and navigation moves to an icon tab bar at the bottom. The search bar carries the type chips and the advanced filters (year range, language, genre, sort) in a popover; Enter or "See all results" opens `/advanced-search/` with the same state in the URL.
 - **Song drawer (desktop only, 1100 px and up with a pointer).** Clicking a song opens a panel on the right and the whole page, header included, narrows to make room. Escape or the close button dismisses it. On phones and tablets a song link opens the song page.
-- **Home.** Hero with a pointer-tilted album stack and inline search. Trending songs, popular albums and the popular-movies rail reveal as you scroll.
+- **Home.** Hero with a 3D stack of album covers you can drag, swipe or tap (it also tips back as you scroll), plus inline search. Below: trending songs, a snap-scrolling 3D coverflow of every album (swipe or drag, tap the centre cover to open it, arrows and keys on desktop) and a movie rail whose posters rotate in depth as they pass the centre. Sections reveal with a 3D tilt-in as you scroll.
+- **Artwork.** Song, album and movie artwork tilts toward the pointer or finger. Detail pages and grids use the same reveal.
 - **Songs, albums, movies.** Filterable and sortable lists. Movies default to the number of IMDb ratings; "Best rated" uses the IMDb weighted-rating formula so a high score from few votes does not rank first.
 - **Charts.** Songs and albums by combined YouTube views and YouTube Music plays; movies by rating count or by weighted rating.
-- **Song page.** Listen links (Spotify, YouTube Music, YouTube video, each with its own count), lyrics column with hide/show and optional timestamps (choices are remembered), a details card, the film card and the rest of the album.
+- **Song page.** Listen links (Spotify, YouTube Music, YouTube video, each with its own count), lyrics with verse blocks, text size, copy, tap-to-highlight a line, optional timestamps and hide/show (choices are remembered), a details card, the film card and the rest of the album.
 - **Search index.** `search-index.json` is a reviewed projection of the DB for browser search. It carries no lyrics and no source payloads.
 
 ## Which DB content the site uses
@@ -76,7 +79,8 @@ Not published: `raw_json`, `*_source_metadata_json`, `source_status_json`, `audi
 | `build.py` | Generates every page and the search index. |
 | `check.py`, `check_public_output.py` | Post-build checks described above. |
 | `name_aliases.json` | Display-name aliases. |
-| `static/theme.js` | Applies the saved theme before paint. |
+| `static/theme.js` | Applies the saved theme before paint and decides whether the intro plays. |
+| `static/intro.js`, `static/intro/` | Entry intro animation and its layers (home page only). |
 | `static/style.css`, `static/app.js` | Styling and all behaviour (search, filters, charts, drawer, lyrics, reveal). |
 | `static/vachika-*.png`, `favicon.png` | Logo mark, wordmark (dark and light) and favicon. |
 | `_headers`, `site.json` | CSP and cache headers; site name, tagline and URL. |
